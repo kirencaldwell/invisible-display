@@ -1,5 +1,5 @@
 name: Invisible Display
-version: "1.0.4"
+version: "1.1.0"
 slug: invisible_display
 description: Alternates your Home Assistant calendars and weather on an Invisible Computers e-paper display
 arch:
@@ -23,6 +23,8 @@ options:
   agenda_days: 7
   calendar_refresh_minutes: 15
   weather_refresh_minutes: 30
+  lists: []
+  lists_refresh_minutes: 5
 schema:
   calendars:
     - entity_id: str
@@ -36,3 +38,7 @@ schema:
   agenda_days: int(1,14)
   calendar_refresh_minutes: int(5,240)
   weather_refresh_minutes: int(10,240)
+  lists:
+    - entity_id: str
+      title: str?
+  lists_refresh_minutes: int(1,240)

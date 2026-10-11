@@ -120,6 +120,13 @@ class HA:
         q = urllib.parse.urlencode({"start": start.isoformat(), "end": end.isoformat()})
         return self._req(f"/api/calendars/{entity_id}?{q}")
 
+    def todo_items(self, entity_id: str) -> list[str]:
+        resp = self._req(
+            "/api/services/todo/get_items?return_response",
+            {"entity_id": entity_id, "status": "needs_action"},
+        )
+        return [i["summary"] for i in resp["service_response"][entity_id]["items"]]
+
     def forecast(self, entity_id: str, kind: str) -> list[dict]:
         resp = self._req(
             "/api/services/weather/get_forecasts?return_response",

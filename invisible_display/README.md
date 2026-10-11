@@ -6,6 +6,8 @@ served from your Home Assistant Green using the display's
 
 - **Calendar** – agenda for the next days from your Home Assistant calendars, a mini month view
   with busy days dotted, and a one-letter tag per calendar.
+- **Lists** – optional checklist page: one column per Home Assistant to-do entity (Todoist, Shopping List, …),
+  showing open items. Enabled by setting `lists`.
 - **Weather** – the current hour (icon, temperature, feels-like, rain, wind, sunrise/sunset),
   the next 8 hours, and a simpler 7-day forecast alongside.
 
@@ -34,6 +36,8 @@ weather entity. Location, timezone and units follow your Home Assistant settings
 | `clock_24h` | `false` | |
 | `week_starts_monday` | `false` | Mini-month layout. |
 | `agenda_days` | `7` | How many days the agenda looks ahead. |
+| `lists` | `[]` | To-do entities for the Lists page: `entity_id` (+ optional `title`). Empty = no Lists page. |
+| `lists_refresh_minutes` | `5` | |
 | `calendar_refresh_minutes` / `weather_refresh_minutes` | `15` / `30` | |
 
 Example `calendars`:

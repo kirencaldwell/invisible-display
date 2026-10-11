@@ -58,3 +58,12 @@ def weather(now: dt.datetime) -> Weather:
     days = [Day(now.date() + dt.timedelta(days=i), conds[i % 7], 72 - i * 2, 51 - i, [10, 0, 80, 30, 60, 90, 20][i])
             for i in range(7)]
     return Weather(cur, hours, days, "mph", dt.time(7, 12), dt.time(18, 31))
+
+
+LISTS = [
+    ("To do", ["Renew car registration", "Call the plumber", "Book flights for the coast trip",
+               "Return library books", "Fix the back gate latch", "Order new filters", "Schedule dentist for the kids",
+               "Water the plants", "Back up the photo library", "Sign the permission slip"]),
+    ("Groceries", ["Milk", "Eggs", "Sourdough bread", "Bananas", "Chicken thighs", "Olive oil", "Cheddar",
+                   "Spinach", "Oat milk", "Coffee beans", "Dish soap", "Apples", "Rice", "Greek yogurt"]),
+]

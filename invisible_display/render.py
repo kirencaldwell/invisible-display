@@ -320,6 +320,42 @@ def calendar_page(W: int, H: int, now: dt.datetime, events: list[Event] | None,
     return c.done()
 
 
+def lists_page(W: int, H: int, now: dt.datetime, lists: list[tuple[str, list[str] | None]]) -> Image.Image:
+    """Checklist columns (e.g. to-do and groceries), one column per list."""
+    c = Canvas(W, H)
+    bottom = c.LH - 12
+    _header(c, "Lists", f"{now:%a %b} {now.day}")
+    n = max(1, len(lists))
+    gap = 36
+    colw = (752 - gap * (n - 1)) / n
+    ROW = 30
+    for i, (title, items) in enumerate(lists):
+        x0 = 24 + i * (colw + gap)
+        x1 = x0 + colw
+        if i:
+            c.line(x0 - gap / 2, 64, x0 - gap / 2, bottom, w=1)
+        c.text(x0, 68, c.fit(title.upper(), 18, colw - 50, bold=True), 18, bold=True)
+        if items is not None:
+            c.text(x1, 71, str(len(items)), 15, anchor="ra")
+        c.line(x0, 94, x1, 94, w=1)
+        if items is None:
+            c.text(x0 + 2, 108, "Unavailable", 18)
+            continue
+        if not items:
+            c.text(x0 + 2, 108, "Nothing here", 18)
+            continue
+        fit = int((bottom - 104) // ROW)
+        shown = items if len(items) <= fit else items[:max(fit - 1, 0)]
+        y = 104
+        for text in shown:
+            c.rect(x0 + 2, y + 5, x0 + 20, y + 23, outline=0, w=2, r=2)
+            c.text(x0 + 32, y + 3, c.fit(text, 19, colw - 34), 19)
+            y += ROW
+        if len(shown) < len(items):
+            c.text(x0 + 2, y + 4, f"+ {len(items) - len(shown)} more", 16, bold=True)
+    return c.done()
+
+
 def weather_page(W: int, H: int, now: dt.datetime, wx: Weather | None, location: str = "",
                  *, clock24=False) -> Image.Image:
     if wx is None or wx.current is None:

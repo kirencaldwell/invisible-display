@@ -46,6 +46,8 @@ DEFAULTS = {
     "agenda_days": 7,
     "calendar_refresh_minutes": 15,
     "weather_refresh_minutes": 30,
+    "lists": [],                        # [{entity_id: todo.x, title: "..."}]; [] = no lists page
+    "lists_refresh_minutes": 5,
     "ha_url": "",
     "ha_token": "",
 }
@@ -96,6 +98,7 @@ class Data:
         self.cal_defs: list[dict] = []
         self.cal_events: dict[str, list[ha.Event]] = {}
         self.weather: ha.Weather | None = None
+        self.lists: dict[str, list[str]] = {}
         self.configured = False
         self.lock = threading.Lock()
 
@@ -160,6 +163,24 @@ class Data:
         except Exception as exc:
             log.warning("Weather %s failed (keeping previous data): %s", self.opts["weather_entity"], exc)
 
+    def refresh_lists(self) -> None:
+        if self.demo:
+            with self.lock:
+                self.lists = {f"demo.{t}": items for t, items in demo.LISTS}
+            return
+        for d in self.opts["lists"]:
+            try:
+                items = self.ha.todo_items(d["entity_id"])
+                with self.lock:
+                    self.lists[d["entity_id"]] = items
+            except Exception as exc:
+                log.warning("List %s failed (keeping previous data): %s", d["entity_id"], exc)
+
+    def list_columns(self) -> list[tuple[str, list[str] | None]]:
+        with self.lock:
+            return [(d.get("title") or d["entity_id"], self.lists.get(d["entity_id"]))
+                    for d in self.opts["lists"]]
+
     def events(self) -> list[ha.Event] | None:
         with self.lock:
             if not self.cal_events:
@@ -171,7 +192,7 @@ class Data:
 
     def run(self) -> None:
         """Background loop; also retries configuration while HA is still starting."""
-        last_cal = last_wx = 0.0
+        last_cal = last_wx = last_lists = 0.0
         while True:
             try:
                 if not self.configured:
@@ -186,6 +207,9 @@ class Data:
                 if now - last_wx >= wx_every:
                     self.refresh_weather()
                     last_wx = now if self.weather is not None else now - wx_every + 30
+                if self.opts["lists"] and now - last_lists >= self.opts["lists_refresh_minutes"] * 60:
+                    self.refresh_lists()
+                    last_lists = now
             except Exception as exc:
                 log.warning("Home Assistant not ready yet: %s", exc)
             time.sleep(15)
@@ -197,7 +221,7 @@ class Frames:
     def __init__(self, opts: dict, data: Data):
         self.opts, self.data = opts, data
         self.W, self.H = DISPLAYS[opts["display_model"]]
-        self.pages = ["calendar", "weather"]
+        self.pages = ["calendar", "weather"] + (["lists"] if opts["lists"] else [])
 
     def page_at(self, now: dt.datetime) -> str:
         slot = int(now.timestamp() // (self.opts["page_minutes"] * 60))
@@ -211,6 +235,8 @@ class Frames:
             return render.calendar_page(self.W, self.H, now, self.data.events(), wx,
                                         clock24=o["clock_24h"], week_starts_monday=o["week_starts_monday"],
                                         agenda_days=o["agenda_days"])
+        if page == "lists":
+            return render.lists_page(self.W, self.H, now, self.data.list_columns())
         with self.data.lock:
             wx = self.data.weather
         return render.weather_page(self.W, self.H, now, wx, self.data.location, clock24=o["clock_24h"])
@@ -296,6 +322,8 @@ def main() -> None:
     opts = load_options(args.options)
     if opts["display_model"] not in DISPLAYS:
         raise SystemExit(f"display_model must be one of {sorted(DISPLAYS)}")
+    if args.demo and not opts["lists"]:
+        opts["lists"] = [{"entity_id": f"demo.{t}", "title": t} for t, _ in demo.LISTS]
 
     client = None
     if not args.demo:
@@ -318,6 +346,8 @@ def main() -> None:
         data.configure()
         data.refresh_calendars()
         data.refresh_weather()
+        if opts["lists"]:
+            data.refresh_lists()
         now = dt.datetime.now(data.tz)
         for page in frames.pages:
             frames.render(page, now).convert("L").save(os.path.join(args.preview, f"{page}.png"))
