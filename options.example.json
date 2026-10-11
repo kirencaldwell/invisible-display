@@ -1,0 +1,10 @@
+{
+  "ha_url": "http://homeassistant.local:8123",
+  "ha_token": "PASTE_A_LONG_LIVED_ACCESS_TOKEN",
+  "calendars": [
+    {"entity_id": "calendar.family", "tag": "F", "name": "Family"}
+  ],
+  "weather_entity": "weather.forecast_home",
+  "display_model": "7_5_inch",
+  "page_minutes": 10
+}

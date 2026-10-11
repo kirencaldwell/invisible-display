@@ -1,0 +1,38 @@
+name: Invisible Display
+version: "1.0.3"
+slug: invisible_display
+description: Alternates your Home Assistant calendars and weather on an Invisible Computers e-paper display
+arch:
+  - aarch64
+  - amd64
+startup: application
+boot: auto
+init: false
+homeassistant_api: true
+ports:
+  8080/tcp: 8080
+ports_description:
+  8080/tcp: Render server the e-paper display connects to
+options:
+  calendars: []
+  weather_entity: weather.forecast_home
+  display_model: 7_5_inch
+  page_minutes: 10
+  clock_24h: false
+  week_starts_monday: false
+  agenda_days: 7
+  calendar_refresh_minutes: 15
+  weather_refresh_minutes: 30
+schema:
+  calendars:
+    - entity_id: str
+      tag: str?
+      name: str?
+  weather_entity: str
+  display_model: list(7_5_inch|10_2_inch)
+  page_minutes: int(1,120)
+  clock_24h: bool
+  week_starts_monday: bool
+  agenda_days: int(1,14)
+  calendar_refresh_minutes: int(5,240)
+  weather_refresh_minutes: int(10,240)

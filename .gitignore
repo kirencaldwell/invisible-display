@@ -1,0 +1,12 @@
+# secrets / local config (options.json holds a long-lived HA token)
+options.json
+.env
+
+# python / macOS / tooling
+__pycache__/
+*.pyc
+.venv/
+venv/
+.DS_Store
+.claude/
+out/
