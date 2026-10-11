@@ -9,8 +9,7 @@ TARGET="${1:-root@homeassistant.local}"
 KEY="${HA_SSH_KEY:-$HOME/.ssh/homeassistant}"
 SSH=(ssh -i "$KEY" -o IdentitiesOnly=yes "$TARGET")
 
-COPYFILE_DISABLE=1 tar --exclude='__pycache__' --exclude='.DS_Store' --exclude='.git' \
-    --exclude='.claude' --exclude='options.json' --exclude='deploy.sh' -cf - . |
+COPYFILE_DISABLE=1 tar --exclude='__pycache__' --exclude='.DS_Store' --exclude='options.json' -C invisible_display -cf - . |
   "${SSH[@]}" 'mkdir -p /local_apps/invisible_display && tar -xf - -C /local_apps/invisible_display \
     && rm -f /local_apps/invisible_display/._* \
     && ha store reload >/dev/null && sleep 3 \
