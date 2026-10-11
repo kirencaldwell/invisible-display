@@ -341,7 +341,6 @@ def lists_page(W: int, H: int, now: dt.datetime, lists: list[tuple[str, list[str
     n = max(1, len(lists))
     gap = 36
     colw = (752 - gap * (n - 1)) / n
-    ROW = 30
     for i, (title, items) in enumerate(lists):
         x0 = 24 + i * (colw + gap)
         x1 = x0 + colw
@@ -357,15 +356,24 @@ def lists_page(W: int, H: int, now: dt.datetime, lists: list[tuple[str, list[str
         if not items:
             c.text(x0 + 2, 108, "Nothing here", 18)
             continue
-        fit = int((bottom - 104) // ROW)
-        shown = items if len(items) <= fit else items[:max(fit - 1, 0)]
-        y = 104
-        for text in shown:
-            c.rect(x0 + 2, y + 5, x0 + 20, y + 23, outline=0, w=2, r=2)
-            c.text(x0 + 32, y + 3, c.fit(text, 19, colw - 34), 19)
-            y += ROW
+        # densest layout that still shows everything: (sub-columns, row height, font size)
+        avail = bottom - 104
+        layouts = [(1, 30, 19), (1, 26, 17), (1, 23, 15), (2, 26, 16), (2, 23, 14), (2, 21, 13)]
+        cols, row, fs = next((l for l in layouts if l[0] * int(avail // l[1]) >= len(items)), layouts[-1])
+        per = int(avail // row)
+        cap = cols * per
+        shown = items if len(items) <= cap else items[:cap - 1]
+        subw = (colw - 8 * (cols - 1)) / cols
+        box = fs - 2
+        for k, text in enumerate(shown):
+            sx = x0 + (k // per) * (subw + 8)
+            y = 104 + (k % per) * row
+            c.rect(sx + 2, y + 3, sx + 2 + box, y + 3 + box, outline=0, w=2 if fs >= 15 else 1, r=2)
+            c.text(sx + box + 10, y + 1, c.fit(text, fs, subw - box - 12), fs)
         if len(shown) < len(items):
-            c.text(x0 + 2, y + 4, f"+ {len(items) - len(shown)} more", 16, bold=True)
+            k = len(shown)
+            c.text(x0 + (k // per) * (subw + 8) + 2, 104 + (k % per) * row + 2,
+                   f"+ {len(items) - len(shown)} more", fs - 1, bold=True)
     return c.done()
 
 
