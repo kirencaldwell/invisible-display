@@ -48,6 +48,8 @@ DEFAULTS = {
     "weather_refresh_minutes": 30,
     "lists": [],                        # [{entity_id: todo.x, title: "..."}]; [] = no lists page
     "lists_refresh_minutes": 5,
+    "todo_entity": "",                  # to-do entity shown on the calendar page ("" = none)
+    "todo_title": "To do",
     "ha_url": "",
     "ha_token": "",
 }
@@ -168,13 +170,23 @@ class Data:
             with self.lock:
                 self.lists = {f"demo.{t}": items for t, items in demo.LISTS}
             return
-        for d in self.opts["lists"]:
+        for eid in self.list_entities():
             try:
-                items = self.ha.todo_items(d["entity_id"])
+                items = self.ha.todo_items(eid)
                 with self.lock:
-                    self.lists[d["entity_id"]] = items
+                    self.lists[eid] = items
             except Exception as exc:
-                log.warning("List %s failed (keeping previous data): %s", d["entity_id"], exc)
+                log.warning("List %s failed (keeping previous data): %s", eid, exc)
+
+    def list_entities(self) -> list[str]:
+        ids = [d["entity_id"] for d in self.opts["lists"]]
+        if self.opts["todo_entity"] and self.opts["todo_entity"] not in ids:
+            ids.append(self.opts["todo_entity"])
+        return ids
+
+    def todo(self) -> list[str] | None:
+        with self.lock:
+            return self.lists.get(self.opts["todo_entity"])
 
     def list_columns(self) -> list[tuple[str, list[str] | None]]:
         with self.lock:
@@ -207,7 +219,7 @@ class Data:
                 if now - last_wx >= wx_every:
                     self.refresh_weather()
                     last_wx = now if self.weather is not None else now - wx_every + 30
-                if self.opts["lists"] and now - last_lists >= self.opts["lists_refresh_minutes"] * 60:
+                if self.list_entities() and now - last_lists >= self.opts["lists_refresh_minutes"] * 60:
                     self.refresh_lists()
                     last_lists = now
             except Exception as exc:
@@ -230,10 +242,8 @@ class Frames:
     def render(self, page: str, now: dt.datetime):
         o = self.opts
         if page == "calendar":
-            with self.data.lock:
-                wx = self.data.weather
-            return render.calendar_page(self.W, self.H, now, self.data.events(), wx,
-                                        clock24=o["clock_24h"], week_starts_monday=o["week_starts_monday"],
+            return render.calendar_page(self.W, self.H, now, self.data.events(), self.data.todo(),
+                                        todo_title=o["todo_title"], clock24=o["clock_24h"], week_starts_monday=o["week_starts_monday"],
                                         agenda_days=o["agenda_days"])
         if page == "lists":
             return render.lists_page(self.W, self.H, now, self.data.list_columns())
@@ -323,7 +333,8 @@ def main() -> None:
     if opts["display_model"] not in DISPLAYS:
         raise SystemExit(f"display_model must be one of {sorted(DISPLAYS)}")
     if args.demo and not opts["lists"]:
-        opts["lists"] = [{"entity_id": f"demo.{t}", "title": t} for t, _ in demo.LISTS]
+        opts["lists"] = [{"entity_id": f"demo.{t}", "title": t} for t, _ in demo.LISTS[1:]]
+        opts["todo_entity"] = f"demo.{demo.LISTS[0][0]}"
 
     client = None
     if not args.demo:
@@ -346,7 +357,7 @@ def main() -> None:
         data.configure()
         data.refresh_calendars()
         data.refresh_weather()
-        if opts["lists"]:
+        if data.list_entities():
             data.refresh_lists()
         now = dt.datetime.now(data.tz)
         for page in frames.pages:

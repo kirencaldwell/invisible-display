@@ -38,6 +38,7 @@ weather entity. Location, timezone and units follow your Home Assistant settings
 | `agenda_days` | `7` | How many days the agenda looks ahead. |
 | `lists` | `[]` | To-do entities for the Lists page: `entity_id` (+ optional `title`). Empty = no Lists page. |
 | `lists_refresh_minutes` | `5` | |
+| `todo_entity` / `todo_title` | `""` / `To do` | A to-do entity shown as a checklist under the mini month on the calendar page. |
 | `calendar_refresh_minutes` / `weather_refresh_minutes` | `15` / `30` | |
 
 Example `calendars`:

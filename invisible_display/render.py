@@ -201,7 +201,7 @@ def message_page(W: int, H: int, title: str, msg: str) -> Image.Image:
 
 
 def calendar_page(W: int, H: int, now: dt.datetime, events: list[Event] | None,
-                  wx: Weather | None, *, clock24=False, week_starts_monday=False,
+                  todo: list[str] | None, *, todo_title="To do", clock24=False, week_starts_monday=False,
                   agenda_days=7) -> Image.Image:
     if events is None:
         return message_page(W, H, "Calendar", "Calendar data isn't available yet.\nCheck the add-on log.")
@@ -262,7 +262,7 @@ def calendar_page(W: int, H: int, now: dt.datetime, events: list[Event] | None,
     if hidden:
         c.text(X0, y + 4, f"+ {hidden} more", 16, bold=True)
 
-    # ---- mini month + today's forecast (right) ----
+    # ---- mini month + to-do list (right) ----
     c.line(538, 64, 538, bottom, w=1)
     MX, CW = 552, 32
     c.text(MX + CW * 3.5, 62, f"{now:%B %Y}", 20, bold=True, anchor="ma")
@@ -284,13 +284,26 @@ def calendar_page(W: int, H: int, now: dt.datetime, events: list[Event] | None,
                 c.ellipse(cx - 2, cy + 7, cx + 2, cy + 11, fill=255 if day == today else 0)
 
     ly = 124 + 6 * 30 + 14
-    c.text(MX, ly, "TODAY'S FORECAST", 13, bold=True)
+    c.text(MX, ly, c.fit(todo_title.upper(), 13, 224 - 30, bold=True), 13, bold=True)
+    if todo is not None:
+        c.text(776, ly, str(len(todo)), 13, anchor="ra")
     c.line(MX, ly + 19, 776, ly + 19, w=1)
-    y0 = ly + 30
-    day = next((d for d in wx.days if d.date == today), None) if wx else None
-    if day is None:
-        c.text(MX, y0, "Forecast unavailable", 16)
-        return c.done()
+    y = ly + 26
+    ROW = 27
+    if todo is None:
+        c.text(MX, y, "Unavailable", 16)
+    elif not todo:
+        c.text(MX, y, "Nothing here", 16)
+    else:
+        fit = int((bottom - y) // ROW)
+        shown = todo if len(todo) <= fit else todo[:max(fit - 1, 0)]
+        for text in shown:
+            c.rect(MX, y + 3, MX + 16, y + 19, outline=0, w=2, r=2)
+            c.text(MX + 26, y + 1, c.fit(text, 17, 776 - MX - 26), 17)
+            y += ROW
+        if len(shown) < len(todo):
+            c.text(MX, y + 2, f"+ {len(todo) - len(shown)} more", 15, bold=True)
+    return c.done()
     label, kind = describe(day.cond)
     draw_icon(c, kind, MX + 28, y0 + 26, 50)
     c.text(MX + 70, y0 - 4, deg(day.hi), 34, bold=True)

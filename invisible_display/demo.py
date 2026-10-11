@@ -64,6 +64,7 @@ LISTS = [
     ("To do", ["Renew car registration", "Call the plumber", "Book flights for the coast trip",
                "Return library books", "Fix the back gate latch", "Order new filters", "Schedule dentist for the kids",
                "Water the plants", "Back up the photo library", "Sign the permission slip"]),
-    ("Groceries", ["Milk", "Eggs", "Sourdough bread", "Bananas", "Chicken thighs", "Olive oil", "Cheddar",
-                   "Spinach", "Oat milk", "Coffee beans", "Dish soap", "Apples", "Rice", "Greek yogurt"]),
+    ("Costco", ["Paper towels", "Rotisserie chicken", "Olive oil", "Coffee beans", "Eggs (5 dozen)", "Frozen berries",
+                "Dish soap", "Rice"]),
+    ("Non-Costco", ["Milk", "Sourdough bread", "Bananas", "Cheddar", "Spinach", "Oat milk", "Apples", "Greek yogurt"]),
 ]
