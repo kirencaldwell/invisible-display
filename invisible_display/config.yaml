@@ -1,5 +1,5 @@
 name: Invisible Display
-version: "1.2.0"
+version: "1.2.1"
 slug: invisible_display
 description: Alternates your Home Assistant calendars and weather on an Invisible Computers e-paper display
 arch:

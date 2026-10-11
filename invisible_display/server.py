@@ -174,7 +174,10 @@ class Data:
             try:
                 items = self.ha.todo_items(eid)
                 with self.lock:
+                    changed = self.lists.get(eid) != items
                     self.lists[eid] = items
+                if changed:
+                    log.info("list %s: %d open items (%s)", eid, len(items), ", ".join(items[:3]))
             except Exception as exc:
                 log.warning("List %s failed (keeping previous data): %s", eid, exc)
 
