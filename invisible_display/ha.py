@@ -217,6 +217,9 @@ def parse_days(raw: list[dict]) -> list[Day]:
     return out
 
 
+_logged_fields: list[int] = []
+
+
 def fetch_weather(ha: HA, entity_id: str, tz: ZoneInfo, now: dt.datetime) -> Weather:
     state = ha.state(entity_id)
     attrs = state.get("attributes", {})
@@ -232,7 +235,11 @@ def fetch_weather(ha: HA, entity_id: str, tz: ZoneInfo, now: dt.datetime) -> Wea
     hours: list[Hour] = []
     days: list[Day] = []
     try:
-        hours = parse_hours(ha.forecast(entity_id, "hourly"), tz, sunrise, sunset)
+        raw_hours = ha.forecast(entity_id, "hourly")
+        if not _logged_fields:
+            _logged_fields.append(1)
+            log.info("%s hourly forecast fields: %s", entity_id, ", ".join(sorted(raw_hours[0])) if raw_hours else "(none)")
+        hours = parse_hours(raw_hours, tz, sunrise, sunset)
     except Exception as exc:
         log.warning("Hourly forecast unavailable for %s: %s", entity_id, exc)
     try:
