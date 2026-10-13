@@ -303,6 +303,12 @@ def fetch_weather(ha: HA, entity_id: str, tz: ZoneInfo, now: dt.datetime) -> Wea
         except Exception as exc2:
             log.warning("Twice-daily forecast unavailable for %s: %s %s", entity_id, exc2, _body(exc2))
     days = [d for d in days if d.date >= now.date()][:7]
+    # Evening with a day/night source: today only has a night period left, so its "high" is really
+    # the low. Use the warmest remaining hour instead.
+    today_temps = [h.temp for h in hours if h.time.date() == now.date()]
+    if days and days[0].date == now.date() and today_temps and days[0].hi == days[0].lo:
+        days[0] = dataclasses.replace(days[0], hi=max(today_temps + [days[0].hi]),
+                                      lo=min(today_temps + [days[0].hi]))
 
     # "Current" is the hourly forecast entry for the current hour, falling back
     # to the entity's own state.
