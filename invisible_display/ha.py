@@ -235,6 +235,39 @@ def parse_days(raw: list[dict]) -> list[Day]:
     return out
 
 
+def _body(exc: Exception) -> str:
+    """Response body of an HTTP error, for diagnostics."""
+    try:
+        return exc.read().decode()[:200]        # type: ignore[attr-defined]
+    except Exception:
+        return ""
+
+
+def parse_twice_daily(raw: list[dict]) -> list[Day]:
+    """Fold day/night forecast periods into one Day per date (high from the day, low from the night)."""
+    by_date: dict[dt.date, dict] = {}
+    for f in raw:
+        temp = _num(f.get("temperature"))
+        if temp is None or not f.get("datetime"):
+            continue
+        t = dt.datetime.fromisoformat(f["datetime"])
+        d = by_date.setdefault(t.date(), {})
+        night = f.get("is_daytime") is False
+        slot = "night" if night else "day"
+        d.setdefault(slot, (temp, f.get("condition") or "cloudy", _num(f.get("precipitation_probability"))))
+    out = []
+    for date, p in sorted(by_date.items()):
+        day = p.get("day")
+        if day:
+            lo = p["night"][0] if "night" in p else _num(None)
+            pops = [x for x in (day[2], p.get("night", (0, 0, None))[2]) if x is not None]
+            out.append(Day(date, day[1], day[0], lo, max(pops) if pops else None))
+        else:                               # only a night period left for today
+            n = p["night"]
+            out.append(Day(date, n[1], n[0], n[0], n[2]))
+    return out
+
+
 _logged_fields: list[int] = []
 
 
@@ -263,7 +296,12 @@ def fetch_weather(ha: HA, entity_id: str, tz: ZoneInfo, now: dt.datetime) -> Wea
     try:
         days = parse_days(ha.forecast(entity_id, "daily"))
     except Exception as exc:
-        log.warning("Daily forecast unavailable for %s: %s", entity_id, exc)
+        log.warning("Daily forecast unavailable for %s: %s %s", entity_id, exc, _body(exc))
+        try:        # e.g. National Weather Service only offers day/night periods
+            days = parse_twice_daily(ha.forecast(entity_id, "twice_daily"))
+            log.info("Using twice_daily forecast for %s", entity_id)
+        except Exception as exc2:
+            log.warning("Twice-daily forecast unavailable for %s: %s %s", entity_id, exc2, _body(exc2))
     days = [d for d in days if d.date >= now.date()][:7]
 
     # "Current" is the hourly forecast entry for the current hour, falling back
