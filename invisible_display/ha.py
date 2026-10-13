@@ -6,6 +6,7 @@ to Google or any weather service directly.
 """
 from __future__ import annotations
 
+import dataclasses
 import datetime as dt
 import json
 import logging
@@ -161,6 +162,23 @@ def parse_events(raw: list[dict], tag: str, tz: ZoneInfo) -> list[Event]:
         except (KeyError, ValueError) as exc:
             log.warning("Skipping unparseable event %r: %s", e.get("summary"), exc)
     return out
+
+
+def merge_events(events: list[Event]) -> list[Event]:
+    """Collapse the same event appearing on several calendars into one, with all their tags.
+
+    Events match on title (case-insensitive), start, end and all-day-ness; the merged
+    tag is the calendars' one-letter tags in alphabetical order, e.g. "KS".
+    """
+    merged: dict[tuple, Event] = {}
+    for e in events:
+        key = (e.title.strip().lower(), e.start, e.end, e.all_day)
+        if key in merged:
+            have = merged[key]
+            merged[key] = dataclasses.replace(have, tag="".join(sorted(set(have.tag) | set(e.tag))))
+        else:
+            merged[key] = e
+    return list(merged.values())
 
 
 def events_on(events: list[Event], day: dt.date) -> list[Event]:

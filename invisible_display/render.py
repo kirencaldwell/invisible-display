@@ -255,9 +255,12 @@ def calendar_page(W: int, H: int, now: dt.datetime, events: list[Event] | None,
             e: Event = val
             c.text(X0, y + 4, "All day" if e.all_day else fmt_time(e.start, clock24), 17)
             tx = X0 + 82
-            c.rect(tx, y + 4, tx + 21, y + 25, fill=0, r=3)
-            c.text(tx + 10.5, y + 15, e.tag, 15, bold=True, anchor="mm", fill=255)
-            c.text(tx + 32, y + 3, c.fit(e.title, 19, X1 - (tx + 32)), 19)
+            for j, ch in enumerate(e.tag):          # one badge per calendar the event is on
+                bx = tx + 24 * j
+                c.rect(bx, y + 4, bx + 21, y + 25, fill=0, r=3)
+                c.text(bx + 10.5, y + 15, ch, 15, bold=True, anchor="mm", fill=255)
+            title_x = tx + 24 * len(e.tag) + 8
+            c.text(title_x, y + 3, c.fit(e.title, 19, X1 - title_x), 19)
         y += heights[kind]
     if hidden:
         c.text(X0, y + 4, f"+ {hidden} more", 16, bold=True)

@@ -200,7 +200,7 @@ class Data:
         with self.lock:
             if not self.cal_events:
                 return None
-            return [e for evs in self.cal_events.values() for e in evs]
+            return ha.merge_events([e for evs in self.cal_events.values() for e in evs])
 
     def legend(self) -> list[tuple[str, str]]:
         return [(d["tag"], d["name"]) for d in self.cal_defs]

@@ -36,6 +36,7 @@ def events(now: dt.datetime) -> list[Event]:
         allday(4, "Trip to the coast", "F", span=3),
         timed(5, 8, 30, 30, "Vet check-up", "F"),
         timed(9, 12, 0, 60, "Lunch with Sam", "F"),
+        timed(1, 9, 0, 45, "Dentist appointment", "K"),   # same event on a second calendar
     ]
 
 
