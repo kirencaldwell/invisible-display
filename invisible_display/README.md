@@ -31,6 +31,7 @@ weather entity. Location, timezone and units follow your Home Assistant settings
 | --- | --- | --- |
 | `calendars` | `[]` | List of `entity_id` (+ optional `tag`, `name`). Empty = use every calendar entity in HA. |
 | `weather_entity` | `weather.forecast_home` | Any HA weather entity that supports hourly and daily forecasts. |
+| `weather_fallback_entity` | `""` | Backup weather entity used when `weather_entity` is unavailable. |
 | `display_model` | `7_5_inch` | or `10_2_inch`. |
 | `page_minutes` | `10` | How long each page stays up before switching. |
 | `clock_24h` | `false` | |

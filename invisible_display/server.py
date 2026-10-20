@@ -39,6 +39,7 @@ FORCE_REFRESH_SECONDS = 20 * 3600      # the display wants a full refresh at lea
 DEFAULTS = {
     "calendars": [],                    # [] = use every calendar entity in Home Assistant
     "weather_entity": "weather.forecast_home",
+    "weather_fallback_entity": "",      # used when weather_entity has no data (e.g. API outage)
     "display_model": "7_5_inch",
     "page_minutes": 10,
     "clock_24h": False,
@@ -158,12 +159,23 @@ class Data:
             with self.lock:
                 self.weather = demo.weather(now)
             return
-        try:
-            wx = ha.fetch_weather(self.ha, self.opts["weather_entity"], self.tz, now)
+        primary = self.opts["weather_entity"]
+        for eid in (primary, self.opts["weather_fallback_entity"]):
+            if not eid:
+                continue
+            try:
+                wx = ha.fetch_weather(self.ha, eid, self.tz, now)
+            except Exception as exc:
+                log.warning("Weather %s failed (keeping previous data): %s", eid, exc)
+                continue
+            if wx.current is None or not (wx.hours or wx.days):
+                log.warning("Weather %s has no usable forecast", eid)
+                continue
+            if eid != primary:
+                log.warning("Using fallback weather entity %s", eid)
             with self.lock:
                 self.weather = wx
-        except Exception as exc:
-            log.warning("Weather %s failed (keeping previous data): %s", self.opts["weather_entity"], exc)
+            return
 
     def refresh_lists(self) -> None:
         if self.demo:

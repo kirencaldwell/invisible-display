@@ -274,6 +274,8 @@ _logged_fields: list[int] = []
 def fetch_weather(ha: HA, entity_id: str, tz: ZoneInfo, now: dt.datetime) -> Weather:
     state = ha.state(entity_id)
     attrs = state.get("attributes", {})
+    if state.get("state") in ("unavailable", "unknown"):
+        log.warning("%s is %s in Home Assistant", entity_id, state.get("state"))
 
     sunrise = sunset = None
     try:
