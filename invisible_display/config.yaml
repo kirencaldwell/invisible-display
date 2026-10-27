@@ -28,9 +28,9 @@ options:
   lists_refresh_minutes: 5
   todo_entity: ""
   todo_title: To do
-  commute_morning: "07:45"
-  commute_evening: "17:00"
-  commute_minutes: 45
+  commute_morning: "07:30"
+  commute_evening: "16:30"
+  commute_minutes: 60
 schema:
   calendars:
     - entity_id: str

@@ -42,8 +42,8 @@ weather entity. Location, timezone and units follow your Home Assistant settings
 | `lists_refresh_minutes` | `5` | |
 | `todo_entity` / `todo_title` | `""` / `To do` | A to-do entity shown as a checklist under the mini month on the calendar page. |
 | `calendar_refresh_minutes` / `weather_refresh_minutes` | `15` / `30` | |
-| `commute_morning` / `commute_evening` | `07:45` / `17:00` | When you leave home / work for the bike commute (24 h `HH:MM`). `""` hides that row. Weekends are skipped. |
-| `commute_minutes` | `45` | Door to door, including the daycare stop. The forecast hours overlapping this window are checked. |
+| `commute_morning` / `commute_evening` | `07:30` / `16:30` | When you leave home / work for the bike commute (24 h `HH:MM`). `""` hides that row. Weekends are skipped. |
+| `commute_minutes` | `60` | Door to door, including the daycare stop. The forecast hours overlapping this window are checked. |
 
 ### Bike commute rain gear
 

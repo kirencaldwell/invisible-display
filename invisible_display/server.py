@@ -53,9 +53,9 @@ DEFAULTS = {
     "todo_entity": "",                  # to-do entity shown on the calendar page ("" = none)
     "todo_title": "To do",
     # Bike commute (home -> daycare -> work, and back): rain-gear advice on the weather page.
-    "commute_morning": "07:45",         # when you leave home; "" = don't show
-    "commute_evening": "17:00",         # when you leave work; "" = don't show
-    "commute_minutes": 45,              # door to door, including the daycare stop
+    "commute_morning": "07:30",         # when you leave home; "" = don't show
+    "commute_evening": "16:30",         # when you leave work; "" = don't show
+    "commute_minutes": 60,              # door to door, including the daycare stop
     "ha_url": "",
     "ha_token": "",
 }
