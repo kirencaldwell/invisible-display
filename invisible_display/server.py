@@ -27,6 +27,7 @@ from zoneinfo import ZoneInfo
 
 import numpy as np
 
+import commute
 import demo
 import ha
 import render
@@ -51,6 +52,10 @@ DEFAULTS = {
     "lists_refresh_minutes": 5,
     "todo_entity": "",                  # to-do entity shown on the calendar page ("" = none)
     "todo_title": "To do",
+    # Bike commute (home -> daycare -> work, and back): rain-gear advice on the weather page.
+    "commute_morning": "07:30",         # when you leave home; "" = don't show
+    "commute_evening": "16:30",         # when you leave work; "" = don't show
+    "commute_minutes": 60,              # door to door, including the daycare stop
     "ha_url": "",
     "ha_token": "",
 }
@@ -264,7 +269,15 @@ class Frames:
             return render.lists_page(self.W, self.H, now, self.data.list_columns())
         with self.data.lock:
             wx = self.data.weather
-        return render.weather_page(self.W, self.H, now, wx, self.data.location, clock24=o["clock_24h"])
+        advice = None
+        if wx is not None:
+            try:
+                advice = commute.advise(wx, now, commute.parse_time(o["commute_morning"]),
+                                        commute.parse_time(o["commute_evening"]), o["commute_minutes"])
+            except ValueError as exc:
+                log.warning("Bad commute time option: %s", exc)
+        return render.weather_page(self.W, self.H, now, wx, self.data.location, clock24=o["clock_24h"],
+                                   commute=advice)
 
 
 class Handler(BaseHTTPRequestHandler):

@@ -53,12 +53,14 @@ def weather(now: dt.datetime) -> Weather:
         if cond == "sunny" and not is_day:
             cond = "clear-night"
         temp = 58 + 12 * math.sin((t.hour - 9) / 24 * 2 * math.pi)
-        hours.append(Hour(t, temp, cond, temp - 3, 10 * (i % 7) if "rain" in cond else 0, 6 + (i % 5), is_day))
+        wet = "rain" in cond
+        hours.append(Hour(t, temp, cond, temp - 3, 30 + 10 * (i % 7) if wet else 0, 6 + (i % 5), is_day,
+                          0.01 * (i % 7) if wet else 0))
     cur = next(h for h in hours if h.time.hour == now.hour)
     conds = ["partlycloudy", "sunny", "rainy", "cloudy", "lightning-rainy", "snowy", "fog"]
     days = [Day(now.date() + dt.timedelta(days=i), conds[i % 7], 72 - i * 2, 51 - i, [10, 0, 80, 30, 60, 90, 20][i])
             for i in range(7)]
-    return Weather(cur, hours, days, "mph", dt.time(7, 12), dt.time(18, 31))
+    return Weather(cur, hours, days, "mph", dt.time(7, 12), dt.time(18, 31), "°F", "in")
 
 
 LISTS = [

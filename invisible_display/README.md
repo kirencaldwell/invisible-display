@@ -9,7 +9,8 @@ served from your Home Assistant Green using the display's
 - **Lists** – optional checklist page: one column per Home Assistant to-do entity (Todoist, Shopping List, …),
   showing open items. Enabled by setting `lists`.
 - **Weather** – the current hour (icon, temperature, feels-like, rain, wind, sunrise/sunset),
-  the next 8 hours, and a simpler 7-day forecast alongside.
+  the next 8 hours, and a simpler 7-day forecast alongside. Underneath, rain-gear advice for the
+  next morning and evening bike commute: jacket, pants, both, "pack" (maybe) or nothing.
 
 Calendars come from the calendar entities you already have in Home Assistant (e.g. the Google Calendar
 integration), so shared calendars work without secret iCal URLs. Weather comes from a Home Assistant
@@ -41,6 +42,23 @@ weather entity. Location, timezone and units follow your Home Assistant settings
 | `lists_refresh_minutes` | `5` | |
 | `todo_entity` / `todo_title` | `""` / `To do` | A to-do entity shown as a checklist under the mini month on the calendar page. |
 | `calendar_refresh_minutes` / `weather_refresh_minutes` | `15` / `30` | |
+| `commute_morning` / `commute_evening` | `07:30` / `16:30` | When you leave home / work for the bike commute (24 h `HH:MM`). `""` hides that row. Weekends are skipped. |
+| `commute_minutes` | `60` | Door to door, including the daycare stop. The forecast hours overlapping this window are checked. |
+
+### Bike commute rain gear
+
+For each commute window the weather page takes the worst hour's chance of rain, the wettest hour's amount and
+the coldest temperature, and decides jacket and pants separately (thresholds are constants at the top of
+`commute.py`):
+
+- **Jacket**: chance of rain ≥ 50% (≥ 40% when it's below 8 °C / 46 °F); "pack" from 25%, or whenever an hour
+  forecasts ≥ 0.5 mm of rain (Open-Meteo can show drizzle at under 20%).
+- **Pants**: ≥ 60% with steady rain (≥ 1 mm/h, or ≥ 0.5 mm/h in the cold), a downpour/thunderstorm, or ≥ 40% with
+  ≥ 2.5 mm/h; "maybe" for ≥ 40% with drizzle, or when it rained in the 2 hours before leaving (road spray).
+- **Drizzle**: a jacket (pants still need real rain) whenever an hour is saturated (humidity ≥ 97%, or
+  temperature within 1 °C of the dew point) and has any rain in the forecast (≥ 10% or a rainy condition). Seattle
+  drizzle gets a low chance and almost no amount, but an hour in it soaks through your top.
+- If the weather entity has no rain amount (e.g. NWS) or no probability (e.g. Met.no), the condition fills in.
 
 Example `calendars`:
 
