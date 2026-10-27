@@ -18,6 +18,11 @@ PANTS_MM, PANTS_MAYBE_MM = 1.0, 0.5         # steady rain vs. drizzle
 DOWNPOUR_MM = 2.5                           # pants even at a lower chance
 COLD_C = 8                                  # below this, wet is miserable: lower the bar
 WET_ROADS_HOURS = 2                         # rain this long before leaving still means road spray
+# Seattle drizzle: saturated air with even a slight chance of rain soaks you over an hour,
+# although forecasts give it a low chance and almost no amount (e.g. 2026-10-27: 11-16%, 99% RH).
+DRIZZLE_RH = 97                             # % relative humidity...
+DRIZZLE_SPREAD_C = 1.0                      # ...or temperature within this of the dew point
+DRIZZLE_POP = 10                            # with at least this chance of rain
 
 RAIN_CONDS = {"rainy", "pouring", "lightning-rainy", "snowy-rainy", "hail"}
 HEAVY_CONDS = {"pouring", "lightning-rainy"}
@@ -65,6 +70,14 @@ def _overlap(hours: list[Hour], start: dt.datetime, end: dt.datetime) -> list[Ho
     return [h for h in hours if h.time < end and h.time + dt.timedelta(hours=1) > start]
 
 
+def _saturated(h: Hour, temp_unit: str) -> bool:
+    if h.humidity is not None and h.humidity >= DRIZZLE_RH:
+        return True
+    if h.dew_point is None:
+        return False
+    return _to_c(h.temp, temp_unit) - _to_c(h.dew_point, temp_unit) <= DRIZZLE_SPREAD_C
+
+
 def assess(hours: list[Hour], start: dt.datetime, end: dt.datetime, temp_unit: str, precip_unit: str,
            label: str) -> Advice:
     win = _overlap(hours, start, end)
@@ -84,6 +97,8 @@ def assess(hours: list[Hour], start: dt.datetime, end: dt.datetime, temp_unit: s
     if mm is None:
         mm = 2.5 if heavy else 1.0 if rainy else 0.5
     cold = _to_c(min(h.temp for h in win), temp_unit) < COLD_C
+    drizzle = any(_saturated(h, temp_unit) and (h.cond in RAIN_CONDS or
+                                                 (h.pop is not None and h.pop >= DRIZZLE_POP)) for h in win)
 
     if pop >= JACKET_POP or (cold and pop >= JACKET_POP - 10):
         jacket = WEAR
@@ -102,6 +117,8 @@ def assess(hours: list[Hour], start: dt.datetime, end: dt.datetime, temp_unit: s
         wet_before = sum(_to_mm(h.precip, precip_unit) or 0 for h in before) >= 1.0 or \
             any(h.cond in RAIN_CONDS and (h.pop is None or h.pop >= PANTS_POP) for h in before)
         pants = MAYBE if wet_before else NO     # road spray off the wheels
+    if drizzle:
+        jacket = pants = WEAR
     jacket = max(jacket, pants)
 
     return Advice(label, start, jacket, pants, max(pops) if pops else None,

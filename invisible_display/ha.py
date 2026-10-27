@@ -41,6 +41,8 @@ class Hour:
     wind: float | None = None
     is_day: bool = True
     precip: float | None = None  # precipitation amount for the hour, in Weather.precip_unit
+    humidity: float | None = None  # relative humidity, percent
+    dew_point: float | None = None  # in Weather.temp_unit
 
 
 @dataclass
@@ -221,7 +223,7 @@ def parse_hours(raw: list[dict], tz: ZoneInfo, sunrise: dt.time | None, sunset: 
             cond = "clear-night"
         out.append(Hour(t, temp, cond, _num(f.get("apparent_temperature")),
                         _num(f.get("precipitation_probability")), _num(f.get("wind_speed")), is_day,
-                        _num(f.get("precipitation"))))
+                        _num(f.get("precipitation")), _num(f.get("humidity")), _num(f.get("dew_point"))))
     out.sort(key=lambda h: h.time)
     return out
 
