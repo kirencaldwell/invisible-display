@@ -18,8 +18,9 @@ PANTS_MM, PANTS_MAYBE_MM = 1.0, 0.5         # steady rain vs. drizzle
 DOWNPOUR_MM = 2.5                           # pants even at a lower chance
 COLD_C = 8                                  # below this, wet is miserable: lower the bar
 WET_ROADS_HOURS = 2                         # rain this long before leaving still means road spray
-# Seattle drizzle: saturated air with even a slight chance of rain soaks you over an hour,
+# Seattle drizzle: saturated air with even a slight chance of rain soaks your top over an hour,
 # although forecasts give it a low chance and almost no amount (e.g. 2026-10-27: 11-16%, 99% RH).
+# It means a jacket; pants still need an actual rain forecast.
 DRIZZLE_RH = 97                             # % relative humidity...
 DRIZZLE_SPREAD_C = 1.0                      # ...or temperature within this of the dew point
 DRIZZLE_POP = 10                            # with at least this chance of rain
@@ -118,7 +119,7 @@ def assess(hours: list[Hour], start: dt.datetime, end: dt.datetime, temp_unit: s
             any(h.cond in RAIN_CONDS and (h.pop is None or h.pop >= PANTS_POP) for h in before)
         pants = MAYBE if wet_before else NO     # road spray off the wheels
     if drizzle:
-        jacket = pants = WEAR
+        jacket = WEAR       # pants only for actual rain, not wet air
     jacket = max(jacket, pants)
 
     return Advice(label, start, jacket, pants, max(pops) if pops else None,

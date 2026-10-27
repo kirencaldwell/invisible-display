@@ -55,9 +55,9 @@ the coldest temperature, and decides jacket and pants separately (thresholds are
   forecasts ≥ 0.5 mm of rain (Open-Meteo can show drizzle at under 20%).
 - **Pants**: ≥ 60% with steady rain (≥ 1 mm/h, or ≥ 0.5 mm/h in the cold), a downpour/thunderstorm, or ≥ 40% with
   ≥ 2.5 mm/h; "maybe" for ≥ 40% with drizzle, or when it rained in the 2 hours before leaving (road spray).
-- **Drizzle**: jacket + pants whenever an hour is saturated (humidity ≥ 97%, or temperature within 1 °C of the
-  dew point) and has any rain in the forecast (≥ 10% or a rainy condition). Seattle drizzle gets a low chance and
-  almost no amount, but an hour in it soaks you.
+- **Drizzle**: a jacket (pants still need real rain) whenever an hour is saturated (humidity ≥ 97%, or
+  temperature within 1 °C of the dew point) and has any rain in the forecast (≥ 10% or a rainy condition). Seattle
+  drizzle gets a low chance and almost no amount, but an hour in it soaks through your top.
 - If the weather entity has no rain amount (e.g. NWS) or no probability (e.g. Met.no), the condition fills in.
 
 Example `calendars`:
