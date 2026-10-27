@@ -12,6 +12,7 @@ import math
 
 from PIL import Image, ImageDraw, ImageFont
 
+from commute import MAYBE, WEAR, Advice
 from ha import Event, Weather, describe, events_on
 
 _FONT_PATHS = {
@@ -381,7 +382,7 @@ def lists_page(W: int, H: int, now: dt.datetime, lists: list[tuple[str, list[str
 
 
 def weather_page(W: int, H: int, now: dt.datetime, wx: Weather | None, location: str = "",
-                 *, clock24=False) -> Image.Image:
+                 *, clock24=False, commute: list[Advice] | None = None) -> Image.Image:
     if wx is None or wx.current is None:
         return message_page(W, H, "Weather", "Weather data isn't available yet.\nCheck the add-on log and weather entity.")
     c = Canvas(W, H)
@@ -414,20 +415,23 @@ def weather_page(W: int, H: int, now: dt.datetime, wx: Weather | None, location:
         c.text(28, y, ln, 19)
         y += 25
 
-    # ---- next hours strip ----
+    # ---- next hours strip (squeezed when the bike commute rows need the space) ----
     c.line(24, 284, 466, 284, w=1)
     nxt = [h for h in wx.hours if h.time > cur.time][:8]
     colw = 442 / 8
+    tight = bool(commute)
     for i, h in enumerate(nxt):
         cx = 24 + colw * (i + 0.5)
         _, k = describe(h.cond)
-        c.text(cx, 296, fmt_hour(h.time, clock24), 16, bold=True, anchor="ma")
-        draw_icon(c, k, cx, 358, 44, night=not h.is_day)
-        c.text(cx, 388, deg(h.temp), 22, bold=True, anchor="ma")
+        c.text(cx, 292 if tight else 296, fmt_hour(h.time, clock24), 16, bold=True, anchor="ma")
+        draw_icon(c, k, cx, 334 if tight else 358, 38 if tight else 44, night=not h.is_day)
+        c.text(cx, 356 if tight else 388, deg(h.temp), 20 if tight else 22, bold=True, anchor="ma")
         if h.pop is not None and h.pop >= 10:
-            c.text(cx, 420, f"{round(h.pop)}%", 15, anchor="ma")
+            c.text(cx, 380 if tight else 420, f"{round(h.pop)}%", 15, anchor="ma")
     if not nxt:
         c.text(24, 300, "Hourly forecast unavailable", 18)
+    if commute:
+        _commute_rows(c, commute[:2], 402, wx.precip_unit)
 
     # ---- week (right) ----
     c.line(480, 64, 480, bottom, w=1)
@@ -451,3 +455,34 @@ def weather_page(W: int, H: int, now: dt.datetime, wx: Weather | None, location:
             if d.lo is not None:
                 c.text(776, yc, deg(d.lo), 22, anchor="rm")
     return c.done()
+
+
+def _commute_rows(c: Canvas, rows: list[Advice], y0: float, precip_unit: str):
+    """Bike commute rain-gear rows: when, the verdict, and the numbers behind it."""
+    c.line(24, y0, 466, y0, w=2)
+    x = 24 + max(c.textw(a.label, 17, True) for a in rows) + 12
+    for i, a in enumerate(rows):
+        y = y0 + 8 + i * 30
+        c.text(24, y, a.label, 17, bold=True)
+        verdict = a.verdict()
+        if a.jacket == WEAR:                # needs gear: white on black, unmissable
+            w = c.textw(verdict, 18, True) + 14
+            c.rect(x, y - 3, x + w, y + 23, fill=0, r=4)
+            c.text(x + 7, y - 1, verdict, 18, bold=True, fill=255)
+        elif a.jacket == MAYBE:             # maybe: outlined
+            w = c.textw(verdict, 18, True) + 14
+            c.rect(x, y - 3, x + w, y + 23, outline=0, w=2, r=4)
+            c.text(x + 7, y - 1, verdict, 18, bold=True)
+        else:
+            w = c.textw(verdict, 18) + 14
+            c.text(x + 7, y - 1, verdict, 18)
+        bits = []
+        if a.pop is not None:
+            bits.append(f"{round(a.pop)}%")
+        if a.precip is not None and a.precip > 0:
+            bits.append(f"{a.precip:.2f} {precip_unit}".strip() if precip_unit == "in"
+                        else f"{a.precip:.1f} {precip_unit or 'mm'}")
+        if a.temp is not None:
+            bits.append(deg(a.temp))
+        if bits and a.known:
+            c.text(466, y + 2, c.fit(" · ".join(bits), 14, 466 - (x + w + 8)), 14, anchor="ra")

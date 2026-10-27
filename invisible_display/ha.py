@@ -40,6 +40,7 @@ class Hour:
     pop: float | None = None    # precipitation probability, percent
     wind: float | None = None
     is_day: bool = True
+    precip: float | None = None  # precipitation amount for the hour, in Weather.precip_unit
 
 
 @dataclass
@@ -59,6 +60,8 @@ class Weather:
     wind_unit: str = ""
     sunrise: dt.time | None = None
     sunset: dt.time | None = None
+    temp_unit: str = ""
+    precip_unit: str = ""
 
 
 # Home Assistant weather condition -> (label, icon kind)
@@ -217,7 +220,8 @@ def parse_hours(raw: list[dict], tz: ZoneInfo, sunrise: dt.time | None, sunset: 
         if cond == "sunny" and not is_day:
             cond = "clear-night"
         out.append(Hour(t, temp, cond, _num(f.get("apparent_temperature")),
-                        _num(f.get("precipitation_probability")), _num(f.get("wind_speed")), is_day))
+                        _num(f.get("precipitation_probability")), _num(f.get("wind_speed")), is_day,
+                        _num(f.get("precipitation"))))
     out.sort(key=lambda h: h.time)
     return out
 
@@ -327,4 +331,5 @@ def fetch_weather(ha: HA, entity_id: str, tz: ZoneInfo, now: dt.datetime) -> Wea
                            state.get("state") or "cloudy", _num(attrs.get("apparent_temperature")),
                            None, _num(attrs.get("wind_speed")), is_day)
 
-    return Weather(current, hours, days, attrs.get("wind_speed_unit", ""), sunrise, sunset)
+    return Weather(current, hours, days, attrs.get("wind_speed_unit", ""), sunrise, sunset,
+                   attrs.get("temperature_unit", ""), attrs.get("precipitation_unit", ""))
