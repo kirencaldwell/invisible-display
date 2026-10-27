@@ -102,8 +102,8 @@ def assess(hours: list[Hour], start: dt.datetime, end: dt.datetime, temp_unit: s
 
     if pop >= JACKET_POP or (cold and pop >= JACKET_POP - 10):
         jacket = WEAR
-    elif pop >= JACKET_MAYBE_POP:
-        jacket = MAYBE
+    elif pop >= JACKET_MAYBE_POP or (amounts and mm >= PANTS_MAYBE_MM):
+        jacket = MAYBE      # the model itself rains on you, whatever its ensemble chance says
     else:
         jacket = NO
 

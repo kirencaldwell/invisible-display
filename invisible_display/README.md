@@ -51,7 +51,8 @@ For each commute window the weather page takes the worst hour's chance of rain, 
 the coldest temperature, and decides jacket and pants separately (thresholds are constants at the top of
 `commute.py`):
 
-- **Jacket**: chance of rain ≥ 50% (≥ 40% when it's below 8 °C / 46 °F); "pack" from 25%.
+- **Jacket**: chance of rain ≥ 50% (≥ 40% when it's below 8 °C / 46 °F); "pack" from 25%, or whenever an hour
+  forecasts ≥ 0.5 mm of rain (Open-Meteo can show drizzle at under 20%).
 - **Pants**: ≥ 60% with steady rain (≥ 1 mm/h, or ≥ 0.5 mm/h in the cold), a downpour/thunderstorm, or ≥ 40% with
   ≥ 2.5 mm/h; "maybe" for ≥ 40% with drizzle, or when it rained in the 2 hours before leaving (road spray).
 - **Drizzle**: jacket + pants whenever an hour is saturated (humidity ≥ 97%, or temperature within 1 °C of the
