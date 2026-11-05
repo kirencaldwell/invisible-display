@@ -256,14 +256,14 @@ class Frames:
 
     def render(self, page: str, now: dt.datetime):
         o = self.opts
+        with self.data.lock:
+            wx = self.data.weather
         if page == "calendar":
             return render.calendar_page(self.W, self.H, now, self.data.events(), self.data.todo(),
                                         todo_title=o["todo_title"], clock24=o["clock_24h"], week_starts_monday=o["week_starts_monday"],
-                                        agenda_days=o["agenda_days"])
+                                        agenda_days=o["agenda_days"], wx=wx)
         if page == "lists":
-            return render.lists_page(self.W, self.H, now, self.data.list_columns())
-        with self.data.lock:
-            wx = self.data.weather
+            return render.lists_page(self.W, self.H, now, self.data.list_columns(), wx)
         return render.weather_page(self.W, self.H, now, wx, self.data.location, clock24=o["clock_24h"])
 
 

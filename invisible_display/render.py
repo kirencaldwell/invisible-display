@@ -180,9 +180,36 @@ def deg(v) -> str:
     return f"{round(v)}°"
 
 
-def _header(c: Canvas, left: str, right: str = ""):
+def weather_summary(wx: Weather | None, today: dt.date) -> tuple[str, str] | None:
+    """(icon kind, one-line summary of today's weather) for page headers."""
+    if wx is None:
+        return None
+    day = next((d for d in wx.days if d.date == today), None)
+    if day is None and wx.current is None:
+        return None
+    cond = day.cond if day else wx.current.cond
+    label, kind = describe(cond)
+    bits = [label]
+    if day:
+        bits.append(f"{deg(day.hi)}/{deg(day.lo)}" if day.lo is not None else deg(day.hi))
+        if day.pop is not None and day.pop >= 20:
+            bits.append(f"Rain {round(day.pop)}%")
+    elif wx.current is not None:
+        bits.append(deg(wx.current.temp))
+    return kind, "  ·  ".join(bits)
+
+
+def _header(c: Canvas, left: str, right: str = "", summary: tuple[str, str] | None = None):
     c.text(24, 8, left, 30, bold=True)
-    if right:
+    if summary:
+        kind, text = summary
+        x1 = 776 - c.textw(right, 20) - 16 if right else 776
+        text = c.fit(text, 20, x1 - 40 - (24 + c.textw(left, 30, True) + 24))
+        c.text(x1, 16, text, 20, anchor="ra")
+        draw_icon(c, kind, x1 - c.textw(text, 20) - 20, 28, 30)
+        if right:
+            c.text(776, 16, right, 20, anchor="ra")
+    elif right:
         c.text(776, 16, right, 20, anchor="ra")
     c.line(24, 52, 776, 52, w=3)
 
@@ -190,9 +217,9 @@ def _header(c: Canvas, left: str, right: str = ""):
 # --------------------------------------------------------------------------
 # Pages
 # --------------------------------------------------------------------------
-def message_page(W: int, H: int, title: str, msg: str) -> Image.Image:
+def message_page(W: int, H: int, title: str, msg: str, summary=None) -> Image.Image:
     c = Canvas(W, H)
-    _header(c, title)
+    _header(c, title, summary=summary)
     y = 90
     for ln in msg.split("\n"):
         c.text(24, y, c.fit(ln, 22, 752), 22)
@@ -202,12 +229,13 @@ def message_page(W: int, H: int, title: str, msg: str) -> Image.Image:
 
 def calendar_page(W: int, H: int, now: dt.datetime, events: list[Event] | None,
                   todo: list[str] | None, *, todo_title="To do", clock24=False, week_starts_monday=False,
-                  agenda_days=7) -> Image.Image:
+                  agenda_days=7, wx: Weather | None = None) -> Image.Image:
+    summary = weather_summary(wx, now.date())
     if events is None:
-        return message_page(W, H, "Calendar", "Calendar data isn't available yet.\nCheck the add-on log.")
+        return message_page(W, H, "Calendar", "Calendar data isn't available yet.\nCheck the add-on log.", summary)
     c = Canvas(W, H)
     bottom = c.LH - 12
-    _header(c, f"{now:%A}, {now:%B} {now.day}")
+    _header(c, f"{now:%A}, {now:%B} {now.day}", summary=summary)
 
     # ---- agenda (left) ----
     X0, X1 = 24, 524
@@ -336,11 +364,12 @@ def calendar_page(W: int, H: int, now: dt.datetime, events: list[Event] | None,
     return c.done()
 
 
-def lists_page(W: int, H: int, now: dt.datetime, lists: list[tuple[str, list[str] | None]]) -> Image.Image:
+def lists_page(W: int, H: int, now: dt.datetime, lists: list[tuple[str, list[str] | None]],
+               wx: Weather | None = None) -> Image.Image:
     """Checklist columns (e.g. to-do and groceries), one column per list."""
     c = Canvas(W, H)
     bottom = c.LH - 12
-    _header(c, "Lists", f"{now:%a %b} {now.day}")
+    _header(c, "Lists", f"{now:%a %b} {now.day}", weather_summary(wx, now.date()))
     n = max(1, len(lists))
     gap = 36
     colw = (752 - gap * (n - 1)) / n
