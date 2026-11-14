@@ -30,7 +30,7 @@ IEM = "https://mesonet.agron.iastate.edu/cache/tile.py/1.0.0/nexrad-n0q-900913{s
 OSM = "https://tile.openstreetmap.org/{z}/{x}/{y}.png"
 AGES = list(range(50, -1, -5))            # minutes ago, oldest first; IEM offers m05m..m50m plus the current frame
 
-DEFAULTS = {"latitude": 0, "longitude": 0, "zoom": 8, "width": 800, "height": 480, "frame_ms": 500,
+DEFAULTS = {"weather_entity": "weather.forecast_home", "weather_fallback_entity": "", "latitude": 0, "longitude": 0, "zoom": 8, "width": 800, "height": 480, "frame_ms": 500,
             "refresh_minutes": 5}
 
 
@@ -45,12 +45,74 @@ def load_options(path: str | None) -> dict:
 def home_location(opts: dict) -> tuple[float, float]:
     if opts["latitude"] or opts["longitude"]:
         return float(opts["latitude"]), float(opts["longitude"])
-    token = os.environ.get("SUPERVISOR_TOKEN")
-    if token:
-        req = urllib.request.Request("http://supervisor/core/api/config", headers={"Authorization": f"Bearer {token}"})
-        cfg = json.load(urllib.request.urlopen(req, timeout=15))
+    if HA_TOKEN:
+        cfg = ha_request("/api/config")
         return cfg["latitude"], cfg["longitude"]
     raise SystemExit("Set latitude and longitude in the options.")
+
+
+# --------------------------------------------------------------------------
+# Home Assistant weather
+# --------------------------------------------------------------------------
+HA_URL = "http://supervisor/core" if os.environ.get("SUPERVISOR_TOKEN") else os.environ.get("HA_URL", "").rstrip("/")
+HA_TOKEN = os.environ.get("SUPERVISOR_TOKEN") or os.environ.get("HA_TOKEN", "")
+
+
+def ha_request(path: str, body=None):
+    req = urllib.request.Request(
+        HA_URL + path, data=json.dumps(body).encode() if body is not None else None,
+        headers={"Authorization": f"Bearer {HA_TOKEN}", "Content-Type": "application/json"})
+    with urllib.request.urlopen(req, timeout=30) as r:
+        return json.load(r)
+
+
+def ha_forecast(entity_id: str, kind: str) -> list[dict]:
+    resp = ha_request("/api/services/weather/get_forecasts?return_response", {"entity_id": entity_id, "type": kind})
+    return resp["service_response"][entity_id]["forecast"]
+
+
+def fold_twice_daily(raw: list[dict]) -> list[dict]:
+    """Day/night periods -> one entry per date (high from the day period, low from the night)."""
+    days: dict[str, dict] = {}
+    for p in raw:
+        d = days.setdefault(p["datetime"][:10], {"datetime": p["datetime"], "temperature": None, "templow": None,
+                                                 "condition": None, "precipitation_probability": None})
+        if p.get("is_daytime", True):
+            d.update(temperature=p.get("temperature"), condition=p.get("condition"),
+                     precipitation_probability=p.get("precipitation_probability"))
+        else:
+            d["templow"] = p.get("temperature")
+            d["condition"] = d["condition"] or p.get("condition")
+            if d["precipitation_probability"] is None:
+                d["precipitation_probability"] = p.get("precipitation_probability")
+    return list(days.values())
+
+
+def fetch_weather(opts: dict) -> dict:
+    for eid in (opts["weather_entity"], opts["weather_fallback_entity"]):
+        if not eid:
+            continue
+        try:
+            state = ha_request(f"/api/states/{eid}")
+            if state["state"] in ("unavailable", "unknown"):
+                log.warning("Weather %s is %s", eid, state["state"])
+                continue
+            out = {"entity": eid, "state": state["state"], "attributes": state["attributes"], "hourly": [], "daily": []}
+            try:
+                out["hourly"] = ha_forecast(eid, "hourly")
+            except Exception as exc:
+                log.warning("Hourly forecast unavailable for %s: %s", eid, exc)
+            try:
+                out["daily"] = ha_forecast(eid, "daily")
+            except Exception:
+                try:
+                    out["daily"] = fold_twice_daily(ha_forecast(eid, "twice_daily"))
+                except Exception as exc:
+                    log.warning("Daily forecast unavailable for %s: %s", eid, exc)
+            return out
+        except Exception as exc:
+            log.warning("Weather %s failed: %s", eid, exc)
+    raise RuntimeError("no weather entity available")
 
 
 # --------------------------------------------------------------------------
@@ -146,11 +208,17 @@ class Radar:
         self.color_gif = b""
         self.frames: list[bytes] = []
         self.updated: dt.datetime | None = None
-        self.tz = None
+        self.weather: dict | None = None
 
     def refresh(self) -> None:
         o = self.opts
         w, h, z = o["width"], o["height"], o["zoom"]
+        try:
+            wx = fetch_weather(o)
+            with self.lock:
+                self.weather, self.updated = wx, dt.datetime.now().astimezone()
+        except Exception as exc:
+            log.warning("weather refresh failed (keeping previous): %s", exc)
         base = basemap(o, self.lat, self.lon, self.cache_dir)
         cx, cy = world(self.lat, self.lon, z)
         now = dt.datetime.now().astimezone()
@@ -172,7 +240,7 @@ class Radar:
             raise RuntimeError("no radar frames could be fetched")
         cg = gif(color, o["frame_ms"])
         with self.lock:
-            self.color_gif, self.frames, self.updated = cg, pngs, now
+            self.color_gif, self.frames = cg, pngs
         log.info("updated %d frames (%d KB)", len(color), len(cg) // 1024)
 
     def run(self) -> None:
@@ -186,13 +254,7 @@ class Radar:
                 time.sleep(60)
 
 
-INDEX = """<!doctype html><meta charset=utf-8><meta name=viewport content="width=device-width,initial-scale=1">
-<title>Weather Radar</title>
-<body style="font-family:sans-serif;margin:16px;background:#fafafa">
-<h2>Weather radar</h2>
-<p><img src="radar.gif" style="max-width:100%;border:1px solid #888"></p>
-<p style="color:#666">Updated {updated}. Radar: NOAA NEXRAD via Iowa Environmental Mesonet. Map: &copy; OpenStreetMap contributors.</p>
-"""
+PAGE = open(os.path.join(os.path.dirname(os.path.abspath(__file__)), "index.html")).read()
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -214,11 +276,12 @@ class Handler(BaseHTTPRequestHandler):
         path = self.path.split("?")[0]
         with r.lock:
             ready = bool(r.color_gif)
-            cg, frames, updated = r.color_gif, r.frames, r.updated
+            cg, frames, updated, wx = r.color_gif, r.frames, r.updated, r.weather
         if path in ("/", "/index.html"):
-            msg = INDEX.format(updated=f"{updated:%-I:%M %p}" if updated else "never")
-            return self._send(200, msg.encode(), "text/html") if ready else self._send(
-                503, b"Radar is still loading, refresh in a few seconds.", "text/plain")
+            return self._send(200, PAGE.encode(), "text/html")
+        if path == "/weather.json":
+            body = json.dumps({"weather": wx, "updated": updated.isoformat() if updated else None})
+            return self._send(200, body.encode(), "application/json")
         if not ready:
             return self._send(503, b"loading", "text/plain")
         if path == "/radar.gif":
