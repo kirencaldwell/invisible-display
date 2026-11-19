@@ -1,0 +1,11 @@
+[Unit]
+Description=CSA helper (runs Claude Code for the CSA Recipes add-on)
+After=network-online.target
+
+[Service]
+ExecStart=/usr/bin/python3 %h/csa-helper/helper.py
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=default.target

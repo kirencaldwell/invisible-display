@@ -1,0 +1,152 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>CSA Recipes</title>
+<style>
+  :root { --bg:#f3f1ea; --card:#fff; --text:#1f2a1f; --muted:#6c756a; --line:#e4e1d6; --green:#3b7d3a; --green-d:#2c5f2b; --warn:#b3412b; }
+  @media (prefers-color-scheme: dark) {
+    :root { --bg:#12160f; --card:#1b2118; --text:#e9eee5; --muted:#8e9a8a; --line:#2b3427; --green:#6fbb6a; --green-d:#8ad186; --warn:#ef8a74; }
+  }
+  * { box-sizing: border-box; }
+  body { margin:0; background:var(--bg); color:var(--text); font:16px/1.45 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif; }
+  main { max-width: 760px; margin: 0 auto; padding: 16px; display: grid; gap: 16px; }
+  .card { background: var(--card); border-radius: 16px; padding: 18px 20px; box-shadow: 0 1px 3px rgba(0,0,0,.08); }
+  h1 { margin: 4px 0 0; font-size: 24px; }
+  h2 { margin: 0 0 12px; font-size: 13px; letter-spacing: .08em; text-transform: uppercase; color: var(--muted); font-weight: 600; }
+  button, .btn { font: inherit; border: 0; border-radius: 12px; padding: 12px 18px; background: var(--green); color: #fff; font-weight: 600; cursor: pointer; display: inline-block; }
+  button.secondary, .btn.secondary { background: transparent; color: var(--green-d); border: 1.5px solid var(--green); }
+  button:disabled { opacity: .5; cursor: default; }
+  input[type=file] { display: none; }
+  .row { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; }
+  .item { display: grid; grid-template-columns: 110px 1fr 36px; gap: 8px; margin-bottom: 8px; }
+  .item input { font: inherit; padding: 9px 10px; border: 1px solid var(--line); border-radius: 10px; background: var(--bg); color: var(--text); width: 100%; }
+  .item button { padding: 0; background: transparent; color: var(--muted); font-size: 20px; }
+  .err { color: var(--warn); margin: 10px 0 0; }
+  .muted { color: var(--muted); }
+  .recipe { border-top: 1px solid var(--line); padding: 16px 0; }
+  .recipe:first-of-type { border-top: 0; padding-top: 0; }
+  .recipe h3 { margin: 0; font-size: 19px; }
+  .recipe .meta { color: var(--muted); font-size: 14px; margin: 2px 0 8px; }
+  .recipe details summary { cursor: pointer; color: var(--green-d); font-weight: 600; margin: 8px 0; }
+  .recipe ul, .recipe ol { margin: 6px 0 10px; padding-left: 22px; }
+  .recipe li.box { font-weight: 600; }
+  .pinned { outline: 2px solid var(--green); }
+  .badge { display:inline-block; background: var(--green); color:#fff; border-radius: 8px; padding: 1px 8px; font-size: 12px; font-weight: 600; margin-left: 8px; vertical-align: middle; }
+  .spin { display: inline-block; width: 14px; height: 14px; border: 2px solid currentColor; border-right-color: transparent; border-radius: 50%; animation: s .8s linear infinite; vertical-align: -2px; margin-right: 8px; }
+  @keyframes s { to { transform: rotate(360deg); } }
+</style>
+</head>
+<body>
+<main>
+  <header><h1>🥬 CSA Recipes</h1><div class="muted">Photograph this week’s letter, pick a recipe, and show it on the display.</div></header>
+
+  <section class="card" id="pinbar" hidden></section>
+
+  <section class="card">
+    <h2>1 · The letter</h2>
+    <div class="row">
+      <label class="btn" id="photoBtn">📷 Take or choose photo<input type="file" id="photo" accept="image/*" capture="environment"></label>
+      <span class="muted" id="status"></span>
+    </div>
+    <div class="err" id="err"></div>
+  </section>
+
+  <section class="card" id="itemsCard" hidden>
+    <h2>2 · In this week’s box</h2>
+    <div id="items"></div>
+    <div class="row">
+      <button class="secondary" id="addItem">+ Add item</button>
+      <button id="suggest">Suggest recipes</button>
+    </div>
+  </section>
+
+  <section class="card" id="recipesCard" hidden>
+    <h2>3 · Recipe ideas</h2>
+    <div id="recipes"></div>
+  </section>
+</main>
+<script>
+const $ = id => document.getElementById(id);
+const esc = s => String(s ?? "").replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+let S = { items: [], recipes: [], pinned: null };
+let busy = false;
+
+async function api(path, body, raw) {
+  const r = await fetch(path, body === undefined ? {} : { method: "POST", body: raw ? body : JSON.stringify(body) });
+  const j = await r.json();
+  if (!r.ok) throw new Error(j.error || "Request failed");
+  return j;
+}
+function setBusy(msg) {
+  busy = !!msg;
+  $("status").innerHTML = msg ? `<span class="spin"></span>${esc(msg)}` : "";
+  document.querySelectorAll("button").forEach(b => b.disabled = busy);
+  $("photoBtn").style.opacity = busy ? .5 : 1;
+  $("photo").disabled = busy;
+}
+async function run(msg, fn) {
+  $("err").textContent = "";
+  setBusy(msg);
+  try { S = await fn(); } catch (e) { $("err").textContent = e.message; }
+  setBusy("");
+  render();
+}
+
+function readItems() {
+  return [...document.querySelectorAll(".item")].map(el => ({
+    quantity: el.children[0].value, name: el.children[1].value })).filter(i => i.name.trim());
+}
+function render() {
+  $("itemsCard").hidden = !S.items.length && !document.querySelector(".item");
+  $("items").innerHTML = S.items.map(i => `<div class="item"><input value="${esc(i.quantity)}" placeholder="qty"><input value="${esc(i.name)}" placeholder="item"><button title="Remove">×</button></div>`).join("");
+  $("recipesCard").hidden = !S.recipes.length;
+  $("recipes").innerHTML = S.recipes.map((r, n) => `
+    <div class="recipe ${S.pinned === n ? "pinned" : ""}">
+      <h3>${esc(r.title)}${S.pinned === n ? '<span class="badge">On display</span>' : ""}</h3>
+      <div class="meta">${[r.servings && r.servings + " servings", r.minutes && r.minutes + " min"].filter(Boolean).join(" · ")}</div>
+      <details><summary>Ingredients &amp; steps</summary>
+        <ul>${r.ingredients.map(i => `<li class="${i.from_box ? "box" : ""}">${esc(i.item)}</li>`).join("")}</ul>
+        <ol>${r.steps.map(s => `<li>${esc(s)}</li>`).join("")}</ol></details>
+      ${S.pinned === n
+        ? `<button class="secondary" data-unpin>Remove from display</button>`
+        : `<button data-pin="${n}">Show on display</button>`}
+    </div>`).join("");
+  const p = S.pinned !== null && S.recipes[S.pinned];
+  $("pinbar").hidden = !p;
+  if (p) $("pinbar").innerHTML = `<h2>On the e-ink display</h2><b>${esc(p.title)}</b>
+    <div class="row" style="margin-top:10px"><button class="secondary" data-unpin>Remove from display</button></div>`;
+}
+
+$("photo").addEventListener("change", async e => {
+  const f = e.target.files[0]; if (!f) return;
+  await run("Reading the letter…", async () => {
+    const s = await api("api/letter", f, true);
+    if (!s.items.length) throw new Error("Couldn't find any items in that photo. Try again with better light, or add them by hand.");
+    return s;
+  });
+  e.target.value = "";
+});
+$("addItem").onclick = () => {
+  S.items = [...readItems(), { quantity: "", name: "" }]; render();
+  document.querySelector(".item:last-child input:nth-child(2)").focus();
+};
+$("items").addEventListener("click", e => {
+  if (e.target.tagName !== "BUTTON") return;
+  e.target.parentElement.remove(); S.items = readItems();
+  api("api/items", { items: S.items }).catch(() => {});
+});
+$("suggest").onclick = () => run("Thinking up recipes… (this takes ~20 seconds)", async () => {
+  await api("api/items", { items: readItems() });
+  return api("api/recipes", {});
+});
+document.addEventListener("click", e => {
+  const t = e.target;
+  if (t.dataset.pin !== undefined) run("Sending to the display…", () => api("api/pin", { index: Number(t.dataset.pin) }));
+  if (t.dataset.unpin !== undefined) run("Removing…", () => api("api/pin", { index: null }));
+});
+api("api/state").then(s => { S = s; render(); }).catch(() => {});
+</script>
+</body>
+</html>

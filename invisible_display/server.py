@@ -21,6 +21,7 @@ import os
 import threading
 import time
 import urllib.error
+import urllib.request
 import urllib.parse
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from zoneinfo import ZoneInfo
@@ -51,6 +52,7 @@ DEFAULTS = {
     "lists_refresh_minutes": 5,
     "todo_entity": "",                  # to-do entity shown on the calendar page ("" = none)
     "todo_title": "To do",
+    "recipe_url": "",                   # pinned-recipe endpoint of the CSA Recipes add-on ("" = feature off)
     "ha_url": "",
     "ha_token": "",
 }
@@ -102,6 +104,7 @@ class Data:
         self.cal_events: dict[str, list[ha.Event]] = {}
         self.weather: ha.Weather | None = None
         self.lists: dict[str, list[str]] = {}
+        self.recipe: dict | None = None
         self.configured = False
         self.lock = threading.Lock()
 
@@ -177,6 +180,26 @@ class Data:
                 self.weather = wx
             return
 
+    def refresh_recipe(self) -> None:
+        if self.demo:
+            with self.lock:
+                self.recipe = demo.recipe() if os.environ.get("DEMO_RECIPE") else None
+            return
+        try:
+            with urllib.request.urlopen(self.opts["recipe_url"], timeout=10) as r:
+                recipe = json.load(r).get("recipe")
+        except Exception as exc:
+            log.warning("Pinned recipe fetch failed (keeping previous): %s", exc)
+            return
+        with self.lock:
+            if (recipe or {}).get("title") != (self.recipe or {}).get("title"):
+                log.info("pinned recipe: %s", recipe["title"] if recipe else "(none)")
+            self.recipe = recipe
+
+    def pinned_recipe(self) -> dict | None:
+        with self.lock:
+            return self.recipe
+
     def refresh_lists(self) -> None:
         if self.demo:
             with self.lock:
@@ -219,7 +242,7 @@ class Data:
 
     def run(self) -> None:
         """Background loop; also retries configuration while HA is still starting."""
-        last_cal = last_wx = last_lists = 0.0
+        last_cal = last_wx = last_lists = last_recipe = 0.0
         while True:
             try:
                 if not self.configured:
@@ -234,6 +257,9 @@ class Data:
                 if now - last_wx >= wx_every:
                     self.refresh_weather()
                     last_wx = now if self.weather is not None else now - wx_every + 30
+                if self.opts["recipe_url"] and now - last_recipe >= 60:
+                    self.refresh_recipe()
+                    last_recipe = now
                 if self.list_entities() and now - last_lists >= self.opts["lists_refresh_minutes"] * 60:
                     self.refresh_lists()
                     last_lists = now
@@ -251,6 +277,8 @@ class Frames:
         self.pages = ["calendar", "weather"] + (["lists"] if opts["lists"] else [])
 
     def page_at(self, now: dt.datetime) -> str:
+        if self.data.pinned_recipe():           # a pinned recipe stays up until it is deselected
+            return "recipe"
         slot = int(now.timestamp() // (self.opts["page_minutes"] * 60))
         return self.pages[slot % len(self.pages)]
 
@@ -262,6 +290,8 @@ class Frames:
             return render.calendar_page(self.W, self.H, now, self.data.events(), self.data.todo(),
                                         todo_title=o["todo_title"], clock24=o["clock_24h"], week_starts_monday=o["week_starts_monday"],
                                         agenda_days=o["agenda_days"], wx=wx)
+        if page == "recipe":
+            return render.recipe_page(self.W, self.H, self.data.pinned_recipe() or {})
         if page == "lists":
             return render.lists_page(self.W, self.H, now, self.data.list_columns(), wx)
         return render.weather_page(self.W, self.H, now, wx, self.data.location, clock24=o["clock_24h"])
@@ -319,7 +349,7 @@ class Handler(BaseHTTPRequestHandler):
 
         if url.path.startswith("/preview/") and url.path.endswith(".png"):
             page = url.path[len("/preview/"):-4]
-            if page in self.frames.pages:
+            if page in self.frames.pages or (page == "recipe" and self.data.pinned_recipe()):
                 buf = io.BytesIO()
                 self.frames.render(page, now).convert("L").save(buf, "PNG")
                 return self._send(200, buf.getvalue(), "image/png")

@@ -409,6 +409,65 @@ def lists_page(W: int, H: int, now: dt.datetime, lists: list[tuple[str, list[str
     return c.done()
 
 
+def _wrap(c: Canvas, text: str, size: int, maxw: float, bold=False) -> list[str]:
+    lines, cur = [], ""
+    for word in text.split():
+        trial = f"{cur} {word}".strip()
+        if cur and c.textw(trial, size, bold) > maxw:
+            lines.append(cur)
+            cur = word
+        else:
+            cur = trial
+    return lines + [cur] if cur else lines
+
+
+def recipe_page(W: int, H: int, recipe: dict) -> Image.Image:
+    """A pinned recipe: ingredients on the left (CSA-box items in bold with a dot), numbered steps on the right."""
+    c = Canvas(W, H)
+    bottom = c.LH - 36
+    title = recipe.get("title", "Recipe")
+    tsize = 30
+    while tsize > 20 and c.textw(title, tsize, True) > 752:
+        tsize -= 2
+    c.text(24, 8, c.fit(title, tsize, 752, True), tsize, bold=True)
+    meta = " · ".join(x for x in (f"Serves {recipe['servings']}" if recipe.get("servings") else "",
+                                  f"{recipe['minutes']} min" if recipe.get("minutes") else "") if x)
+    c.line(24, 52, 776, 52, w=3)
+    foot = "  ·  ".join(x for x in (meta, "● from your CSA box") if x)
+    c.text(24, c.LH - 28, foot, 16)
+
+    ings = recipe.get("ingredients", [])
+    steps = recipe.get("steps", [])
+    LX, LW, RX = 24, 250, 306
+    RW = 776 - RX
+    top = 66
+    for size in range(26, 9, -1):               # biggest type at which everything fits
+        step = size + 6
+        left_rows = [(i, _wrap(c, i["item"], size, LW - 18, i.get("from_box"))) for i in ings]
+        left_h = sum(len(w) * (size + 3) + 5 for _, w in left_rows)
+        right_rows = [_wrap(c, s, size, RW - 28) for s in steps]
+        right_h = sum(len(w) * (size + 3) + 8 for w in right_rows)
+        if max(left_h, right_h) <= bottom - top:
+            break
+    y = top
+    for ing, wrapped in left_rows:
+        if ing.get("from_box"):
+            c.ellipse(LX, y + size * 0.35, LX + 8, y + size * 0.35 + 8, fill=0)
+        for ln in wrapped:
+            c.text(LX + 16, y, ln, size, bold=bool(ing.get("from_box")))
+            y += size + 3
+        y += 5
+    c.line(RX - 16, top, RX - 16, bottom, w=1)
+    y = top
+    for n, wrapped in enumerate(right_rows, 1):
+        c.text(RX, y, f"{n}.", size, bold=True)
+        for ln in wrapped:
+            c.text(RX + 26, y, ln, size)
+            y += size + 3
+        y += 8
+    return c.done()
+
+
 def weather_page(W: int, H: int, now: dt.datetime, wx: Weather | None, location: str = "",
                  *, clock24=False) -> Image.Image:
     if wx is None or wx.current is None:

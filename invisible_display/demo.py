@@ -69,3 +69,19 @@ LISTS = [
                 "Dish soap", "Rice"]),
     ("Non-Costco", ["Milk", "Sourdough bread", "Bananas", "Cheddar", "Spinach", "Oat milk", "Apples", "Greek yogurt"]),
 ]
+
+
+def recipe() -> dict:
+    return {"title": "Roasted Delicata Squash with Kale and Farro", "servings": 4, "minutes": 45,
+            "ingredients": [{"item": "2 delicata squash, halved and sliced", "from_box": True},
+                            {"item": "1 bunch kale, stemmed and torn", "from_box": True},
+                            {"item": "1 red onion", "from_box": True},
+                            {"item": "1 cup farro", "from_box": False},
+                            {"item": "3 tbsp olive oil", "from_box": False},
+                            {"item": "2 tbsp maple syrup", "from_box": False},
+                            {"item": "1/4 cup crumbled feta", "from_box": False}],
+            "steps": ["Heat the oven to 425F and toss the squash with oil, syrup, salt and pepper.",
+                      "Roast the squash on a sheet pan for 25 minutes, flipping once.",
+                      "Simmer the farro in salted water for 20 minutes, then drain.",
+                      "Saute the onion in oil until soft, add the kale and cook until wilted.",
+                      "Fold the farro into the kale, top with squash and feta, and serve warm."]}
