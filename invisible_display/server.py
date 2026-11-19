@@ -340,6 +340,11 @@ class Handler(BaseHTTPRequestHandler):
             log.info("render %-8s sending %d bytes", page, len(buf))
             return self._send(200, buf, headers=headers)
 
+        if url.path == "/refresh-recipe":       # the CSA Recipes add-on calls this right after (un)pinning
+            if self.frames.opts["recipe_url"]:
+                self.frames.data.refresh_recipe()
+            return self._send(200, b"ok", "text/plain")
+
         if url.path == "/ack":
             with self.state_lock:
                 if self.state["pending"]:

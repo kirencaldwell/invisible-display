@@ -1,5 +1,5 @@
 name: CSA Recipes
-version: "0.2.1"
+version: "0.3.0"
 slug: csa_recipes
 description: Photograph your CSA delivery letter, get recipe ideas, and pin one to the e-ink display
 arch:
@@ -18,11 +18,13 @@ ports:
 ports_description:
   8080/tcp: Pinned recipe JSON for the e-ink display (/pinned.json)
 options:
+  display_url: http://abd13010-invisible-display:8080
   helper_url: ""
   helper_token: ""
   recipe_count: 4
   dietary_notes: ""
 schema:
+  display_url: str?
   helper_url: str
   helper_token: password
   recipe_count: int(2,8)

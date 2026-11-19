@@ -27,7 +27,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from PIL import Image, ImageOps
 
 log = logging.getLogger("csa")
-DEFAULTS = {"helper_url": "", "helper_token": "", "recipe_count": 4, "dietary_notes": ""}
+DEFAULTS = {"display_url": "", "helper_url": "", "helper_token": "", "recipe_count": 4, "dietary_notes": ""}
 
 def load_options(path: str | None) -> dict:
     opts = dict(DEFAULTS)
@@ -94,6 +94,16 @@ def suggest_recipes(opts: dict, items: list[dict]) -> list[dict]:
     if not out:
         raise UserError("No usable recipes came back, please try again.")
     return out
+
+
+def poke_display(opts: dict) -> None:
+    """Tell the display add-on to re-read the pinned recipe now instead of at its next poll."""
+    if not opts["display_url"]:
+        return
+    try:
+        urllib.request.urlopen(opts["display_url"].rstrip("/") + "/refresh-recipe", timeout=5).read()
+    except Exception as exc:
+        log.warning("Couldn't notify the display (it will pick the change up within a minute): %s", exc)
 
 
 class State:
@@ -181,7 +191,9 @@ class Handler(BaseHTTPRequestHandler):
                 s = self.state.snapshot()
                 if idx is not None and not (isinstance(idx, int) and 0 <= idx < len(s["recipes"])):
                     raise UserError("No such recipe.")
-                return self._json(self.state.update(pinned=idx))
+                result = self.state.update(pinned=idx)
+                poke_display(self.opts)
+                return self._json(result)
         except UserError as exc:
             return self._json({"error": str(exc)}, 400)
         except Exception as exc:
