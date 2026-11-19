@@ -2,7 +2,7 @@
 """CSA helper: runs Claude Code with fixed prompts on behalf of the CSA Recipes Home Assistant add-on.
 
   POST /letter    body = image bytes             -> {"items": [{"name", "quantity"}]}
-  POST /recipes   body = {"items": [...], "count": 4, "notes": ""}  -> {"recipes": [...]}
+  POST /recipes   body = {"items": [...], "count": 4, "notes": "", "request": ""}  -> {"recipes": [...]}
   GET  /health
 
 Every request needs `Authorization: Bearer <token>` (the token in ~/.csa-helper/token). Claude Code runs headless
@@ -74,9 +74,11 @@ def read_letter(image: bytes) -> list:
         return run_claude(LETTER_PROMPT.format(path=name), "Read", d)
 
 
-def recipes(items: list, count: int, notes: str) -> list:
+def recipes(items: list, count: int, notes: str, request: str = "") -> list:
     listing = ", ".join(f"{i.get('quantity', '')} {i['name']}".strip() for i in items)
     notes = f"Dietary notes: {notes}.\n" if notes else ""
+    if request.strip():
+        notes += f"The cook's request for this batch (follow it, e.g. cuisine, effort or style): {request.strip()[:500]}\n"
     with tempfile.TemporaryDirectory(prefix="csa-") as d:
         return run_claude(RECIPE_PROMPT.format(items=listing, n=count, notes=notes), "", d)
 
@@ -116,7 +118,7 @@ class Handler(BaseHTTPRequestHandler):
                 return self._send(200, {"items": read_letter(body)})
             if self.path == "/recipes":
                 req = json.loads(body)
-                return self._send(200, {"recipes": recipes(req["items"], int(req.get("count", 4)), req.get("notes", ""))})
+                return self._send(200, {"recipes": recipes(req["items"], int(req.get("count", 4)), req.get("notes", ""), req.get("request", ""))})
         except HelperError as exc:
             return self._send(502, {"error": str(exc)})
         except (ValueError, KeyError, TypeError) as exc:

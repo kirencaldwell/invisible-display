@@ -24,6 +24,7 @@
   .item { display: grid; grid-template-columns: 110px 1fr 36px; gap: 8px; margin-bottom: 8px; }
   .item input { font: inherit; padding: 9px 10px; border: 1px solid var(--line); border-radius: 10px; background: var(--bg); color: var(--text); width: 100%; }
   .item button { padding: 0; background: transparent; color: var(--muted); font-size: 20px; }
+  textarea { font: inherit; width: 100%; padding: 10px 12px; border: 1px solid var(--line); border-radius: 10px; background: var(--bg); color: var(--text); resize: vertical; }
   .err { color: var(--warn); margin: 10px 0 0; }
   .muted { color: var(--muted); }
   .recipe { border-top: 1px solid var(--line); padding: 16px 0; }
@@ -67,7 +68,9 @@
   <section class="card" id="itemsCard" hidden>
     <h2>2 · In this week’s box</h2>
     <div id="items"></div>
-    <div class="row">
+    <label class="muted" for="request" style="display:block;margin:14px 0 6px">Anything else Claude should know? (optional)</label>
+    <textarea id="request" rows="2" maxlength="500" placeholder="e.g. Mexican-Korean fusion ideas, quick weeknight meals, kid-friendly, no oven"></textarea>
+    <div class="row" style="margin-top:12px">
       <button class="secondary" id="addItem">+ Add item</button>
       <button id="suggest">Suggest recipes</button>
     </div>
@@ -81,7 +84,7 @@
 <script>
 const $ = id => document.getElementById(id);
 const esc = s => String(s ?? "").replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
-let S = { items: [], recipes: [], pinned: null };
+let S = { items: [], recipes: [], pinned: null, request: "" };
 let busy = false;
 
 async function api(path, body, raw) {
@@ -106,26 +109,28 @@ async function run(msg, fn) {
   render();
 }
 
+const isPinned = r => S.pinned && S.pinned.title === r.title;
 function readItems() {
   return [...document.querySelectorAll(".item")].map(el => ({
     quantity: el.children[0].value, name: el.children[1].value })).filter(i => i.name.trim());
 }
 function render() {
+  if (document.activeElement !== $("request")) $("request").value = S.request || $("request").value;
   $("itemsCard").hidden = !S.items.length && !document.querySelector(".item");
   $("items").innerHTML = S.items.map(i => `<div class="item"><input value="${esc(i.quantity)}" placeholder="qty"><input value="${esc(i.name)}" placeholder="item"><button title="Remove">×</button></div>`).join("");
   $("recipesCard").hidden = !S.recipes.length;
   $("recipes").innerHTML = S.recipes.map((r, n) => `
-    <div class="recipe ${S.pinned === n ? "pinned" : ""}">
-      <h3>${esc(r.title)}${S.pinned === n ? '<span class="badge">On display</span>' : ""}</h3>
+    <div class="recipe ${isPinned(r) ? "pinned" : ""}">
+      <h3>${esc(r.title)}${isPinned(r) ? '<span class="badge">On display</span>' : ""}</h3>
       <div class="meta">${[r.servings && r.servings + " servings", r.minutes && r.minutes + " min"].filter(Boolean).join(" · ")}</div>
       <details><summary>Ingredients &amp; steps</summary>
         <ul>${r.ingredients.map(i => `<li class="${i.from_box ? "box" : ""}">${esc(i.item)}</li>`).join("")}</ul>
         <ol>${r.steps.map(s => `<li>${esc(s)}</li>`).join("")}</ol></details>
-      ${S.pinned === n
+      ${isPinned(r)
         ? `<button class="secondary" data-unpin>Remove from display</button>`
         : `<button data-pin="${n}">Show on display</button>`}
     </div>`).join("");
-  const p = S.pinned !== null && S.recipes[S.pinned];
+  const p = S.pinned;
   $("pinbar").hidden = !p;
   if (p) $("pinbar").innerHTML = `<h2>On the e-ink display</h2><b>${esc(p.title)}</b>
     <div class="row" style="margin-top:10px"><button class="secondary" data-unpin>Remove from display</button></div>`;
@@ -176,7 +181,7 @@ $("items").addEventListener("click", e => {
 });
 $("suggest").onclick = () => run("Thinking up recipes… (this takes ~20 seconds)", async () => {
   await api("api/items", { items: readItems() });
-  return api("api/recipes", {});
+  return api("api/recipes", { request: $("request").value });
 });
 document.addEventListener("click", e => {
   const t = e.target;

@@ -79,8 +79,9 @@ def read_letter(opts: dict, data: bytes) -> list[dict]:
             for i in items if isinstance(i, dict) and str(i.get("name", "")).strip()]
 
 
-def suggest_recipes(opts: dict, items: list[dict]) -> list[dict]:
-    body = json.dumps({"items": items, "count": opts["recipe_count"], "notes": opts["dietary_notes"]}).encode()
+def suggest_recipes(opts: dict, items: list[dict], request: str = "") -> list[dict]:
+    body = json.dumps({"items": items, "count": opts["recipe_count"], "notes": opts["dietary_notes"],
+                       "request": request}).encode()
     raw = helper(opts, "/recipes", body, "application/json")["recipes"]
     out = []
     for r in raw:
@@ -109,13 +110,16 @@ def poke_display(opts: dict) -> None:
 class State:
     def __init__(self, path: str):
         self.path, self.lock = path, threading.Lock()
-        self.data = {"items": [], "recipes": [], "pinned": None}
+        self.data = {"items": [], "recipes": [], "pinned": None, "request": ""}   # pinned: a copy of the recipe on the display
         if os.path.exists(path):
             try:
                 with open(path) as f:
                     self.data.update(json.load(f))
             except (OSError, ValueError):
                 log.warning("Ignoring unreadable %s", path)
+        p = self.data["pinned"]
+        if isinstance(p, int):          # older versions stored an index into recipes
+            self.data["pinned"] = self.data["recipes"][p] if p < len(self.data["recipes"]) else None
 
     def save(self) -> None:
         tmp = self.path + ".tmp"
@@ -165,9 +169,7 @@ class Handler(BaseHTTPRequestHandler):
         if path == "/api/state":
             return self._json(self.state.snapshot())
         if path == "/pinned.json":
-            s = self.state.snapshot()
-            r = s["recipes"][s["pinned"]] if s["pinned"] is not None and s["pinned"] < len(s["recipes"]) else None
-            return self._json({"recipe": r})
+            return self._json({"recipe": self.state.snapshot()["pinned"]})
         self._send(404, b"not found", "text/plain")
 
     def do_POST(self):
@@ -176,7 +178,7 @@ class Handler(BaseHTTPRequestHandler):
             body = self._body()
             if path == "/api/letter":
                 items = read_letter(self.opts, body)
-                return self._json(self.state.update(items=items, recipes=[], pinned=None))
+                return self._json(self.state.update(items=items, recipes=[]))
             if path == "/api/items":
                 items = [{"name": str(i["name"]).strip(), "quantity": str(i.get("quantity", "")).strip()}
                          for i in json.loads(body)["items"] if str(i.get("name", "")).strip()]
@@ -185,13 +187,14 @@ class Handler(BaseHTTPRequestHandler):
                 items = self.state.snapshot()["items"]
                 if not items:
                     raise UserError("Add some ingredients first.")
-                return self._json(self.state.update(recipes=suggest_recipes(self.opts, items), pinned=None))
+                request = str((json.loads(body) if body else {}).get("request", "")).strip()[:500]
+                return self._json(self.state.update(recipes=suggest_recipes(self.opts, items, request), request=request))
             if path == "/api/pin":
                 idx = json.loads(body).get("index")
                 s = self.state.snapshot()
                 if idx is not None and not (isinstance(idx, int) and 0 <= idx < len(s["recipes"])):
                     raise UserError("No such recipe.")
-                result = self.state.update(pinned=idx)
+                result = self.state.update(pinned=None if idx is None else s["recipes"][idx])
                 poke_display(self.opts)
                 return self._json(result)
         except UserError as exc:
