@@ -349,7 +349,7 @@ class Handler(BaseHTTPRequestHandler):
 
         if url.path.startswith("/preview/") and url.path.endswith(".png"):
             page = url.path[len("/preview/"):-4]
-            if page in self.frames.pages or (page == "recipe" and self.data.pinned_recipe()):
+            if page in self.frames.pages or (page == "recipe" and self.frames.data.pinned_recipe()):
                 buf = io.BytesIO()
                 self.frames.render(page, now).convert("L").save(buf, "PNG")
                 return self._send(200, buf.getvalue(), "image/png")
