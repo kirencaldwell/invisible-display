@@ -10,6 +10,7 @@
     :root { --bg:#12160f; --card:#1b2118; --text:#e9eee5; --muted:#8e9a8a; --line:#2b3427; --green:#6fbb6a; --green-d:#8ad186; --warn:#ef8a74; }
   }
   * { box-sizing: border-box; }
+  [hidden] { display: none !important; }
   body { margin:0; background:var(--bg); color:var(--text); font:16px/1.45 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif; }
   main { max-width: 760px; margin: 0 auto; padding: 16px; display: grid; gap: 16px; }
   .card { background: var(--card); border-radius: 16px; padding: 18px 20px; box-shadow: 0 1px 3px rgba(0,0,0,.08); }
@@ -47,11 +48,21 @@
   <section class="card">
     <h2>1 · The letter</h2>
     <div class="row">
-      <label class="btn" id="photoBtn">📷 Take or choose photo<input type="file" id="photo" accept="image/*" capture="environment"></label>
+      <button id="camBtn" hidden>📷 Take photo</button>
+      <label class="btn" id="photoBtn"><span id="photoLbl">📷 Take or choose photo</span><input type="file" id="photo" accept="image/*" capture="environment"></label>
+      <label class="btn secondary" id="libBtn">🖼 Choose from library<input type="file" id="lib" accept="image/*"></label>
       <span class="muted" id="status"></span>
     </div>
     <div class="err" id="err"></div>
   </section>
+
+  <div id="cam" hidden style="position:fixed;inset:0;background:#000;z-index:10;display:none;flex-direction:column">
+    <video id="vid" autoplay playsinline muted style="flex:1;min-height:0;width:100%;object-fit:contain"></video>
+    <div class="row" style="justify-content:center;padding:16px;gap:16px">
+      <button class="secondary" id="camCancel" style="color:#fff;border-color:#fff">Cancel</button>
+      <button id="camShoot">Capture</button>
+    </div>
+  </div>
 
   <section class="card" id="itemsCard" hidden>
     <h2>2 · In this week’s box</h2>
@@ -85,6 +96,7 @@ function setBusy(msg) {
   document.querySelectorAll("button").forEach(b => b.disabled = busy);
   $("photoBtn").style.opacity = busy ? .5 : 1;
   $("photo").disabled = busy;
+  $("lib").disabled = busy;
 }
 async function run(msg, fn) {
   $("err").textContent = "";
@@ -119,15 +131,40 @@ function render() {
     <div class="row" style="margin-top:10px"><button class="secondary" data-unpin>Remove from display</button></div>`;
 }
 
-$("photo").addEventListener("change", async e => {
-  const f = e.target.files[0]; if (!f) return;
-  await run("Reading the letter…", async () => {
-    const s = await api("api/letter", f, true);
+function sendLetter(blob) {
+  return run("Reading the letter…", async () => {
+    const s = await api("api/letter", blob, true);
     if (!s.items.length) throw new Error("Couldn't find any items in that photo. Try again with better light, or add them by hand.");
     return s;
   });
+}
+for (const id of ["photo", "lib"]) $(id).addEventListener("change", async e => {
+  const f = e.target.files[0]; if (!f) return;
+  await sendLetter(f);
   e.target.value = "";
 });
+
+// In-page camera (only where the browser allows it: needs a secure context). Falls back to the file pickers.
+let stream = null;
+function stopCam() { if (stream) stream.getTracks().forEach(t => t.stop()); stream = null; $("cam").style.display = "none"; }
+if (window.isSecureContext && navigator.mediaDevices && navigator.mediaDevices.getUserMedia) {
+  $("camBtn").hidden = false;
+  $("photoBtn").hidden = true;
+  $("camBtn").onclick = async () => {
+    try {
+      stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: { ideal: "environment" }, width: { ideal: 2560 } }, audio: false });
+      $("vid").srcObject = stream; $("cam").style.display = "flex";
+    } catch (e) { $("err").textContent = "Couldn't open the camera (" + e.name + "). Use “Choose from library” instead."; }
+  };
+  $("camCancel").onclick = stopCam;
+  $("camShoot").onclick = () => {
+    const v = $("vid"), c = document.createElement("canvas");
+    c.width = v.videoWidth; c.height = v.videoHeight;
+    c.getContext("2d").drawImage(v, 0, 0);
+    stopCam();
+    c.toBlob(b => sendLetter(b), "image/jpeg", 0.9);
+  };
+}
 $("addItem").onclick = () => {
   S.items = [...readItems(), { quantity: "", name: "" }]; render();
   document.querySelector(".item:last-child input:nth-child(2)").focus();
