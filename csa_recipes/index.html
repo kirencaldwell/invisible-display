@@ -25,6 +25,14 @@
   .item input { font: inherit; padding: 9px 10px; border: 1px solid var(--line); border-radius: 10px; background: var(--bg); color: var(--text); width: 100%; }
   .item button { padding: 0; background: transparent; color: var(--muted); font-size: 20px; }
   textarea { font: inherit; width: 100%; padding: 10px 12px; border: 1px solid var(--line); border-radius: 10px; background: var(--bg); color: var(--text); resize: vertical; }
+  .g { display: grid; grid-template-columns: 28px 1fr 32px; gap: 8px; align-items: center; padding: 7px 0; border-top: 1px solid var(--line); }
+  .g:first-child { border-top: 0; }
+  .g.have .t { text-decoration: line-through; color: var(--muted); }
+  .g small { display: block; color: var(--muted); font-size: 12px; }
+  .g input[type=checkbox] { width: 20px; height: 20px; }
+  .g button { padding: 0; background: transparent; color: var(--muted); font-size: 20px; }
+  #addG, #onhand, select { font: inherit; padding: 9px 10px; border: 1px solid var(--line); border-radius: 10px; background: var(--bg); color: var(--text); width: 100%; }
+  select { width: auto; }
   .err { color: var(--warn); margin: 10px 0 0; }
   .muted { color: var(--muted); }
   .recipe { border-top: 1px solid var(--line); padding: 16px 0; }
@@ -72,19 +80,33 @@
     <textarea id="request" rows="2" maxlength="500" placeholder="e.g. Mexican-Korean fusion ideas, quick weeknight meals, kid-friendly, no oven"></textarea>
     <div class="row" style="margin-top:12px">
       <button class="secondary" id="addItem">+ Add item</button>
-      <button id="suggest">Suggest recipes</button>
+      <label class="muted">Dinners <select id="meals"><option>2</option><option>3</option><option>4</option><option selected>5</option><option>6</option><option>7</option></select></label>
+      <button id="suggest">Plan meals</button>
     </div>
   </section>
 
   <section class="card" id="recipesCard" hidden>
-    <h2>3 · Recipe ideas</h2>
+    <h2>3 · Meal plan</h2>
     <div id="recipes"></div>
+  </section>
+
+  <section class="card" id="groceryCard" hidden>
+    <h2>4 · Still to buy</h2>
+    <div class="muted" style="margin-bottom:10px">Tick what you already have, remove what you don’t want to buy, then revise the plan around it.</div>
+    <div id="grocery"></div>
+    <div class="row" style="margin:10px 0">
+      <input id="addG" placeholder="Add something to buy" style="flex:1;min-width:160px">
+      <button class="secondary" id="addGBtn">Add</button>
+    </div>
+    <label class="muted" for="onhand" style="display:block;margin:10px 0 6px">Other things we have on hand (comma separated)</label>
+    <input id="onhand" placeholder="e.g. rice, chicken thighs, coconut milk">
+    <div class="row" style="margin-top:12px"><button id="revise">Revise plan around this</button></div>
   </section>
 </main>
 <script>
 const $ = id => document.getElementById(id);
 const esc = s => String(s ?? "").replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
-let S = { items: [], recipes: [], pinned: null, request: "" };
+let S = { items: [], recipes: [], pinned: null, request: "", meals: 5, grocery: [], removed: [], on_hand: "" };
 let busy = false;
 
 async function api(path, body, raw) {
@@ -119,6 +141,14 @@ function render() {
   $("itemsCard").hidden = !S.items.length && !document.querySelector(".item");
   $("items").innerHTML = S.items.map(i => `<div class="item"><input value="${esc(i.quantity)}" placeholder="qty"><input value="${esc(i.name)}" placeholder="item"><button title="Remove">×</button></div>`).join("");
   $("recipesCard").hidden = !S.recipes.length;
+  $("groceryCard").hidden = !S.recipes.length;
+  if (S.meals) $("meals").value = String(S.meals);
+  if (document.activeElement !== $("onhand")) $("onhand").value = S.on_hand || "";
+  const need = S.grocery.filter(g => !g.have).length;
+  $("grocery").innerHTML = S.grocery.map((g, n) => `<div class="g ${g.have ? "have" : ""}"><input type="checkbox" data-have="${n}" ${g.have ? "checked" : ""} title="I have this">
+      <div class="t">${esc(g.item)}${g.for && g.for.length ? `<small>${esc(g.for.join(", "))}</small>` : ""}</div>
+      <button data-rm="${n}" title="Don’t buy">×</button></div>`).join("") || '<div class="muted">Nothing extra to buy.</div>';
+  $("revise").disabled = busy;
   $("recipes").innerHTML = S.recipes.map((r, n) => `
     <div class="recipe ${isPinned(r) ? "pinned" : ""}">
       <h3>${esc(r.title)}${isPinned(r) ? '<span class="badge">On display</span>' : ""}</h3>
@@ -179,14 +209,39 @@ $("items").addEventListener("click", e => {
   e.target.parentElement.remove(); S.items = readItems();
   api("api/items", { items: S.items }).catch(() => {});
 });
-$("suggest").onclick = () => run("Thinking up recipes… (this takes ~20 seconds)", async () => {
+$("suggest").onclick = () => run("Planning the week… (this takes about a minute)", async () => {
   await api("api/items", { items: readItems() });
-  return api("api/recipes", { request: $("request").value });
+  return api("api/recipes", { request: $("request").value, meals: Number($("meals").value) });
 });
 document.addEventListener("click", e => {
   const t = e.target;
   if (t.dataset.pin !== undefined) run("Sending to the display…", () => api("api/pin", { index: Number(t.dataset.pin) }));
   if (t.dataset.unpin !== undefined) run("Removing…", () => api("api/pin", { index: null }));
+});
+function saveGrocery() {
+  return api("api/grocery", { grocery: S.grocery, removed: S.removed, on_hand: $("onhand").value })
+    .then(s => { S = s; }).catch(e => { $("err").textContent = e.message; });
+}
+$("grocery").addEventListener("change", async e => {
+  if (e.target.dataset.have === undefined) return;
+  S.grocery[Number(e.target.dataset.have)].have = e.target.checked;
+  render(); await saveGrocery(); render();
+});
+$("grocery").addEventListener("click", async e => {
+  if (e.target.dataset.rm === undefined) return;
+  const [g] = S.grocery.splice(Number(e.target.dataset.rm), 1);
+  S.removed = [...(S.removed || []), g.item];
+  render(); await saveGrocery(); render();
+});
+$("addGBtn").onclick = async () => {
+  const v = $("addG").value.trim(); if (!v) return;
+  S.grocery.push({ item: v, for: [], have: false }); $("addG").value = "";
+  render(); await saveGrocery(); render();
+};
+$("onhand").addEventListener("change", saveGrocery);
+$("revise").onclick = () => run("Revising the plan… (about a minute)", async () => {
+  await saveGrocery();
+  return api("api/revise", { request: $("request").value });
 });
 api("api/state").then(s => { S = s; render(); }).catch(() => {});
 </script>

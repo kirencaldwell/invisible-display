@@ -79,10 +79,7 @@ def read_letter(opts: dict, data: bytes) -> list[dict]:
             for i in items if isinstance(i, dict) and str(i.get("name", "")).strip()]
 
 
-def suggest_recipes(opts: dict, items: list[dict], request: str = "") -> list[dict]:
-    body = json.dumps({"items": items, "count": opts["recipe_count"], "notes": opts["dietary_notes"],
-                       "request": request}).encode()
-    raw = helper(opts, "/recipes", body, "application/json")["recipes"]
+def clean_recipes(raw: list) -> list[dict]:
     out = []
     for r in raw:
         try:
@@ -92,9 +89,27 @@ def suggest_recipes(opts: dict, items: list[dict], request: str = "") -> list[di
                 "steps": [str(s).strip() for s in r["steps"]]})
         except (KeyError, TypeError):
             continue
-    if not out:
-        raise UserError("No usable recipes came back, please try again.")
     return out
+
+
+def make_plan(opts: dict, st: dict, request: str, meals: int, revise: bool = False) -> dict:
+    """Plan `meals` dinners plus a supplemental grocery list. With revise, rework around what the user has/removed."""
+    body = {"items": st["items"], "meals": meals, "notes": opts["dietary_notes"], "request": request}
+    if revise:
+        body["have"] = [g["item"] for g in st["grocery"] if g.get("have")] + \
+                       [x.strip() for x in st["on_hand"].split(",") if x.strip()]
+        body["avoid"] = st["removed"]
+        body["keep"] = [r["title"] for r in st["recipes"]]
+    out = helper(opts, "/plan", json.dumps(body).encode(), "application/json")
+    recipes = clean_recipes(out["recipes"])
+    if not recipes:
+        raise UserError("No usable recipes came back, please try again.")
+    grocery = [{"item": str(g["item"]).strip(), "for": [str(t) for t in g.get("for", [])], "have": False}
+               for g in out["grocery"] if isinstance(g, dict) and str(g.get("item", "")).strip()]
+    plan = {"recipes": recipes, "grocery": grocery, "removed": st["removed"] if revise else []}
+    if revise:                                  # what they have is now baked into the plan; remember it as on hand
+        plan["on_hand"] = ", ".join(body["have"])
+    return plan
 
 
 def poke_display(opts: dict) -> None:
@@ -110,7 +125,8 @@ def poke_display(opts: dict) -> None:
 class State:
     def __init__(self, path: str):
         self.path, self.lock = path, threading.Lock()
-        self.data = {"items": [], "recipes": [], "pinned": None, "request": ""}   # pinned: a copy of the recipe on the display
+        self.data = {"items": [], "recipes": [], "pinned": None, "request": "", "meals": 5,
+                     "grocery": [], "removed": [], "on_hand": ""}   # pinned: a copy of the recipe on the display
         if os.path.exists(path):
             try:
                 with open(path) as f:
@@ -187,8 +203,23 @@ class Handler(BaseHTTPRequestHandler):
                 items = self.state.snapshot()["items"]
                 if not items:
                     raise UserError("Add some ingredients first.")
-                request = str((json.loads(body) if body else {}).get("request", "")).strip()[:500]
-                return self._json(self.state.update(recipes=suggest_recipes(self.opts, items, request), request=request))
+                req = json.loads(body) if body else {}
+                request = str(req.get("request", "")).strip()[:500]
+                meals = max(2, min(7, int(req.get("meals") or 5)))
+                plan = make_plan(self.opts, self.state.snapshot(), request, meals)
+                return self._json(self.state.update(request=request, meals=meals, on_hand="", **plan))
+            if path == "/api/grocery":
+                req = json.loads(body)
+                grocery = [{"item": str(g["item"]).strip(), "for": [str(t) for t in g.get("for", [])], "have": bool(g.get("have"))}
+                           for g in req["grocery"] if str(g.get("item", "")).strip()]
+                return self._json(self.state.update(grocery=grocery, removed=[str(x) for x in req.get("removed", [])],
+                                                    on_hand=str(req.get("on_hand", ""))[:500]))
+            if path == "/api/revise":
+                req = json.loads(body) if body else {}
+                st = self.state.snapshot()
+                request = str(req.get("request", st["request"])).strip()[:500]
+                plan = make_plan(self.opts, st, request, st["meals"], revise=True)
+                return self._json(self.state.update(request=request, **plan))
             if path == "/api/pin":
                 idx = json.loads(body).get("index")
                 s = self.state.snapshot()

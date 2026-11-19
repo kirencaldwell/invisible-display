@@ -3,6 +3,8 @@
 
   POST /letter    body = image bytes             -> {"items": [{"name", "quantity"}]}
   POST /recipes   body = {"items": [...], "count": 4, "notes": "", "request": ""}  -> {"recipes": [...]}
+  POST /plan      body = {"items", "meals", "notes", "request", "have": [...], "avoid": [...], "keep": [titles]}
+                                                  -> {"recipes": [...], "grocery": [{"item", "for": [titles]}]}
   GET  /health
 
 Every request needs `Authorization: Bearer <token>` (the token in ~/.csa-helper/token). Claude Code runs headless
@@ -44,11 +46,26 @@ Reply with ONLY a JSON array and no other text, each element:
 Set from_box true only for ingredients that come from the CSA box list above."""
 
 
+PLAN_PROMPT = """A household got a CSA box containing: {items}.
+{extra}Plan {n} different dinners for the week that make good use of the box ingredients (cover as many as possible,
+vary cuisines and cooking methods, each recipe uses at least two box items). Recipes may also use ordinary pantry staples
+and other groceries.
+{notes}Each recipe must be short enough to read on a small e-ink screen: at most 10 ingredients and 8 steps, one sentence per step.
+Then write the supplemental grocery list: everything the recipes need that is NOT from the box and NOT already on hand,
+merged across recipes with combined quantities. Leave out basic staples (salt, pepper, cooking oil, water).
+Reply with ONLY a JSON object and no other text:
+{{"recipes": [{{"title": "...", "servings": 4, "minutes": 35,
+   "ingredients": [{{"item": "2 delicata squash", "from_box": true}}, {{"item": "1 tbsp olive oil", "from_box": false}}],
+   "steps": ["...", "..."]}}],
+  "grocery": [{{"item": "2 lb chicken thighs", "for": ["<recipe title>"]}}]}}
+Set from_box true only for ingredients that come from the CSA box list."""
+
+
 class HelperError(Exception):
     pass
 
 
-def run_claude(prompt: str, tools: str, cwd: str) -> list:
+def run_claude(prompt: str, tools: str, cwd: str, kind: str = "array"):
     cmd = [CLAUDE, "-p", prompt, "--output-format", "json", "--tools", tools, "--no-session-persistence"]
     try:
         with lock:
@@ -60,7 +77,8 @@ def run_claude(prompt: str, tools: str, cwd: str) -> list:
         raise HelperError("Claude Code failed (is it signed in on the mini PC?)")
     try:
         text = json.loads(proc.stdout)["result"]
-        return json.loads(re.search(r"\[.*\]", text, re.S).group(0))
+        pattern = r"\{.*\}" if kind == "object" else r"\[.*\]"
+        return json.loads(re.search(pattern, text, re.S).group(0))
     except (ValueError, KeyError, AttributeError) as exc:
         log.warning("unparseable reply: %s", proc.stdout[:500])
         raise HelperError("Couldn't understand Claude's reply") from exc
@@ -81,6 +99,28 @@ def recipes(items: list, count: int, notes: str, request: str = "") -> list:
         notes += f"The cook's request for this batch (follow it, e.g. cuisine, effort or style): {request.strip()[:500]}\n"
     with tempfile.TemporaryDirectory(prefix="csa-") as d:
         return run_claude(RECIPE_PROMPT.format(items=listing, n=count, notes=notes), "", d)
+
+
+def plan(req: dict) -> dict:
+    items = req["items"]
+    listing = ", ".join(f"{i.get('quantity', '')} {i['name']}".strip() for i in items)
+    extra = ""
+    if req.get("have"):
+        extra += "Also already on hand (treat as available, do not put on the grocery list): " + "; ".join(req["have"]) + ".\n"
+    if req.get("avoid"):
+        extra += "The household does NOT want to buy or use: " + "; ".join(req["avoid"]) + ". Do not use these.\n"
+    notes = f"Dietary notes: {req['notes']}.\n" if req.get("notes") else ""
+    if str(req.get("request", "")).strip():
+        notes += f"The cook's request (follow it, e.g. cuisine, effort or style): {str(req['request']).strip()[:500]}\n"
+    if req.get("keep"):
+        notes += ("Keep these existing recipes unchanged where they still work without the avoided items, and replace only "
+                  "the ones that don't: " + "; ".join(req["keep"]) + ".\n")
+    prompt = PLAN_PROMPT.format(items=listing, extra=extra, n=int(req.get("meals", 5)), notes=notes)
+    with tempfile.TemporaryDirectory(prefix="csa-") as d:
+        out = run_claude(prompt, "", d, kind="object")
+    if not isinstance(out.get("recipes"), list) or not isinstance(out.get("grocery"), list):
+        raise HelperError("Claude's plan was missing recipes or a grocery list")
+    return out
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -116,6 +156,8 @@ class Handler(BaseHTTPRequestHandler):
         try:
             if self.path == "/letter":
                 return self._send(200, {"items": read_letter(body)})
+            if self.path == "/plan":
+                return self._send(200, plan(json.loads(body)))
             if self.path == "/recipes":
                 req = json.loads(body)
                 return self._send(200, {"recipes": recipes(req["items"], int(req.get("count", 4)), req.get("notes", ""), req.get("request", ""))})
