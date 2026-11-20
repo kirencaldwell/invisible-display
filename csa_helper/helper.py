@@ -3,6 +3,7 @@
 
   POST /letter    body = image bytes             -> {"items": [{"name", "quantity"}]}
   POST /recipes   body = {"items": [...], "count": 4, "notes": "", "request": ""}  -> {"recipes": [...]}
+  POST /format    body = {"text": "<pasted recipe>", "items": [{"name"}...]}  -> {"recipe": {...}}
   POST /plan      body = {"items", "meals", "notes", "request", "have": [...], "avoid": [...], "keep": [titles]}
                                                   -> {"recipes": [...], "grocery": [{"item", "for": [titles]}]}
   GET  /health
@@ -61,6 +62,21 @@ Reply with ONLY a JSON object and no other text:
 Set from_box true only for ingredients that come from the CSA box list."""
 
 
+FORMAT_PROMPT = """Below is a recipe someone copied from a web page or chat. It may contain junk (menus, ads, tips,
+follow-up questions) and may contain several versions. Extract ONE recipe: if there is an original and an adjusted or scaled
+version, use the adjusted one. Keep the amounts exactly as written, don't invent anything, and fix obvious formatting problems.
+Make it short enough for a small e-ink screen: at most 10 ingredients (merge optional garnishes into one line) and at most
+8 steps, one sentence each, keeping important times and temperatures. Use plain ASCII fractions like 1/2 and ranges like 2-3.
+{box}Reply with ONLY a JSON object and no other text:
+{{"title": "...", "servings": 4, "minutes": 35,
+  "ingredients": [{{"item": "2 tbsp butter", "from_box": false}}],
+  "steps": ["...", "..."]}}
+(servings may be text like "3-4"; minutes is total time as a number, estimate it if not stated.)
+
+--- RECIPE TEXT ---
+{text}"""
+
+
 class HelperError(Exception):
     pass
 
@@ -99,6 +115,21 @@ def recipes(items: list, count: int, notes: str, request: str = "") -> list:
         notes += f"The cook's request for this batch (follow it, e.g. cuisine, effort or style): {request.strip()[:500]}\n"
     with tempfile.TemporaryDirectory(prefix="csa-") as d:
         return run_claude(RECIPE_PROMPT.format(items=listing, n=count, notes=notes), "", d)
+
+
+def format_recipe(req: dict) -> dict:
+    text = str(req["text"]).strip()[:20000]
+    if len(text) < 20:
+        raise HelperError("That's too short to be a recipe")
+    box = ""
+    if req.get("items"):
+        box = ("These items came in the household's CSA box; set from_box true for ingredients that are one of them: "
+               + ", ".join(i["name"] for i in req["items"]) + ".\n")
+    with tempfile.TemporaryDirectory(prefix="csa-") as d:
+        out = run_claude(FORMAT_PROMPT.format(box=box, text=text), "", d, kind="object")
+    if not out.get("title") or not out.get("ingredients") or not out.get("steps"):
+        raise HelperError("Couldn't find a recipe in that text")
+    return {"recipe": out}
 
 
 def plan(req: dict) -> dict:
@@ -156,6 +187,8 @@ class Handler(BaseHTTPRequestHandler):
         try:
             if self.path == "/letter":
                 return self._send(200, {"items": read_letter(body)})
+            if self.path == "/format":
+                return self._send(200, format_recipe(json.loads(body)))
             if self.path == "/plan":
                 return self._send(200, plan(json.loads(body)))
             if self.path == "/recipes":

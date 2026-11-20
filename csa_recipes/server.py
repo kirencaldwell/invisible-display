@@ -161,7 +161,7 @@ class State:
     def __init__(self, path: str):
         self.path, self.lock = path, threading.Lock()
         self.data = {"items": [], "recipes": [], "pinned": None, "request": "", "meals": 5,
-                     "grocery": [], "removed": [], "on_hand": ""}   # pinned: a copy of the recipe on the display
+                     "grocery": [], "removed": [], "on_hand": "", "custom": []}   # pinned: a copy of the recipe on the display
         if os.path.exists(path):
             try:
                 with open(path) as f:
@@ -249,6 +249,24 @@ class Handler(BaseHTTPRequestHandler):
                            for g in req["grocery"] if str(g.get("item", "")).strip()]
                 return self._json(self.state.update(grocery=grocery, removed=[str(x) for x in req.get("removed", [])],
                                                     on_hand=str(req.get("on_hand", ""))[:500]))
+            if path == "/api/format":
+                req = json.loads(body)
+                text = str(req.get("text", "")).strip()
+                if len(text) < 20:
+                    raise UserError("Paste the recipe text first.")
+                st = self.state.snapshot()
+                out = helper(self.opts, "/format", json.dumps({"text": text, "items": st["items"]}).encode(), "application/json")
+                recipe = clean_recipes([out["recipe"]])
+                if not recipe:
+                    raise UserError("Couldn't find a recipe in that text.")
+                recipe = recipe[0]
+                custom = [recipe] + [r for r in st["custom"] if r["title"] != recipe["title"]][:9]
+                if req.get("show"):
+                    result = self.state.update(custom=custom, pinned=recipe)
+                    poke_display(self.opts)
+                else:
+                    result = self.state.update(custom=custom)
+                return self._json(result)
             if path == "/api/send-grocery":
                 return self._json(send_to_todo(self.opts, self.state.snapshot()["grocery"]))
             if path == "/api/revise":

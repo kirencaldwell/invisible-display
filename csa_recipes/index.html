@@ -106,6 +106,16 @@
     </div>
     <div class="muted" id="sendMsg" style="margin-top:8px"></div>
   </section>
+  <section class="card" id="customCard">
+    <h2>Your own recipe</h2>
+    <div class="muted" style="margin-bottom:8px">Paste a recipe from anywhere, messy is fine. Claude tidies it up for the display.</div>
+    <textarea id="pasted" rows="6" placeholder="Paste the recipe text here…"></textarea>
+    <div class="row" style="margin-top:12px">
+      <button id="fmtShow">Format &amp; show on display</button>
+      <button class="secondary" id="fmtOnly">Format only</button>
+    </div>
+    <div id="customList" style="margin-top:14px"></div>
+  </section>
 </main>
 <script>
 const $ = id => document.getElementById(id);
@@ -136,6 +146,19 @@ async function run(msg, fn) {
 }
 
 const isPinned = r => S.pinned && S.pinned.title === r.title;
+function recipeCard(r, attr, n) {
+  return `
+    <div class="recipe ${isPinned(r) ? "pinned" : ""}">
+      <h3>${esc(r.title)}${isPinned(r) ? '<span class="badge">On display</span>' : ""}</h3>
+      <div class="meta">${[r.servings && r.servings + " servings", r.minutes && r.minutes + " min"].filter(Boolean).join(" · ")}</div>
+      <details><summary>Ingredients &amp; steps</summary>
+        <ul>${r.ingredients.map(i => `<li class="${i.from_box ? "box" : ""}">${esc(i.item)}</li>`).join("")}</ul>
+        <ol>${r.steps.map(s => `<li>${esc(s)}</li>`).join("")}</ol></details>
+      ${isPinned(r)
+        ? `<button class="secondary" data-unpin>Remove from display</button>`
+        : `<button data-${attr}="${n}">Show on display</button>`}
+    </div>`;
+}
 function readItems() {
   return [...document.querySelectorAll(".item")].map(el => ({
     quantity: el.children[0].value, name: el.children[1].value })).filter(i => i.name.trim());
@@ -153,17 +176,8 @@ function render() {
       <div class="t">${esc(g.item)}${g.for && g.for.length ? `<small>${esc(g.for.join(", "))}</small>` : ""}</div>
       <button data-rm="${n}" title="Don’t buy">×</button></div>`).join("") || '<div class="muted">Nothing extra to buy.</div>';
   $("revise").disabled = busy;
-  $("recipes").innerHTML = S.recipes.map((r, n) => `
-    <div class="recipe ${isPinned(r) ? "pinned" : ""}">
-      <h3>${esc(r.title)}${isPinned(r) ? '<span class="badge">On display</span>' : ""}</h3>
-      <div class="meta">${[r.servings && r.servings + " servings", r.minutes && r.minutes + " min"].filter(Boolean).join(" · ")}</div>
-      <details><summary>Ingredients &amp; steps</summary>
-        <ul>${r.ingredients.map(i => `<li class="${i.from_box ? "box" : ""}">${esc(i.item)}</li>`).join("")}</ul>
-        <ol>${r.steps.map(s => `<li>${esc(s)}</li>`).join("")}</ol></details>
-      ${isPinned(r)
-        ? `<button class="secondary" data-unpin>Remove from display</button>`
-        : `<button data-pin="${n}">Show on display</button>`}
-    </div>`).join("");
+  $("recipes").innerHTML = S.recipes.map((r, n) => recipeCard(r, "pin", n)).join("");
+  $("customList").innerHTML = (S.custom || []).map((r, n) => recipeCard(r, "pinc", n)).join("");
   const p = S.pinned;
   $("pinbar").hidden = !p;
   if (p) $("pinbar").innerHTML = `<h2>On the e-ink display</h2><b>${esc(p.title)}</b>
@@ -220,6 +234,7 @@ $("suggest").onclick = () => run("Planning the week… (this takes about a minut
 document.addEventListener("click", e => {
   const t = e.target;
   if (t.dataset.pin !== undefined) run("Sending to the display…", () => api("api/pin", { index: Number(t.dataset.pin) }));
+  if (t.dataset.pinc !== undefined) run("Sending to the display…", () => api("api/pin", { recipe: S.custom[Number(t.dataset.pinc)] }));
   if (t.dataset.unpin !== undefined) run("Removing…", () => api("api/pin", { index: null }));
 });
 function saveGrocery() {
@@ -243,6 +258,15 @@ $("addGBtn").onclick = async () => {
   render(); await saveGrocery(); render();
 };
 $("onhand").addEventListener("change", saveGrocery);
+for (const [id, show] of [["fmtShow", true], ["fmtOnly", false]]) $(id).onclick = () => {
+  const text = $("pasted").value;
+  if (text.trim().length < 20) { $("err").textContent = "Paste the recipe text first."; return; }
+  return run("Formatting the recipe… (about 20 seconds)", async () => {
+    const s = await api("api/format", { text, show });
+    $("pasted").value = "";
+    return s;
+  });
+};
 $("sendG").onclick = async () => {
   $("sendMsg").textContent = ""; $("err").textContent = "";
   setBusy("Sending to the list…");
