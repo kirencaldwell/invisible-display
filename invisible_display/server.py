@@ -106,6 +106,7 @@ class Data:
         self.lists: dict[str, list[str]] = {}
         self.recipe: dict | None = None
         self.core_version = ""
+        self.versions: dict[str, str] = {}      # Home Assistant OS / Supervisor, for the update-triggered tests
         self.configured = False
         self.lock = threading.Lock()
 
@@ -147,6 +148,16 @@ class Data:
             self.core_version = self.ha.config().get("version", self.core_version)
         except Exception as exc:
             log.warning("Couldn't read the Home Assistant version: %s", exc)
+        token = os.environ.get("SUPERVISOR_TOKEN")
+        if not token:
+            return
+        for name, path in (("os", "/os/info"), ("supervisor", "/supervisor/info")):
+            try:
+                req = urllib.request.Request("http://supervisor" + path, headers={"Authorization": f"Bearer {token}"})
+                with urllib.request.urlopen(req, timeout=10) as r:
+                    self.versions[name] = str(json.load(r)["data"]["version"])
+            except Exception as exc:
+                log.warning("Couldn't read the %s version: %s", name, exc)
 
     def refresh_calendars(self) -> None:
         if self.demo:
@@ -209,7 +220,7 @@ class Data:
     def health(self) -> dict:
         """What the periodic test routine checks: is each data source loaded, and which HA version are we talking to."""
         with self.lock:
-            out = {"core_version": self.core_version, "configured": self.configured,
+            out = {"core_version": self.core_version, "versions": dict(self.versions), "configured": self.configured,
                    "calendar_events": None if not self.cal_events else sum(len(v) for v in self.cal_events.values()),
                    "weather": None if self.weather is None else {"hours": len(self.weather.hours), "days": len(self.weather.days)},
                    "lists": {k: len(v) for k, v in self.lists.items()}}
