@@ -24,7 +24,7 @@ Green at 192.168.4.54; you can read their live state with curl against the ports
 POST to them or change what is pinned on the display).
 Find the root cause. If it is a bug in our code or a change in Home Assistant that our code must adapt to (for example a
 changed API, entity or service), fix it in this repo, bump the add-on's version in its config.yaml, verify with
-python3 -m py_compile and, where possible, ~/.csa-tests/venv/bin/python invisible_display/server.py --demo --preview /tmp/preview,
+python3 -m py_compile and, where possible, PYTHONPATH=~/.csa-tests/pylibs python3 invisible_display/server.py --demo --preview /tmp/preview,
 and commit on this branch (never push, never deploy). If the cause is outside this repo (a device is offline, an entity was
 removed or renamed in Home Assistant, the mini PC helper is down), do not guess at fixes: write a short diagnosis instead.
 Either way, finish by writing ~/.csa-tests/fix-summary.md with: what failed, the root cause, what you changed (or what the
