@@ -33,8 +33,13 @@ def hook(kind: str) -> None:
         return
     cwd = ev.get("cwd") or os.path.join(HOME, "invisible-display")
     branch = subprocess.run(["git", "-C", cwd, "branch", "--show-current"], capture_output=True, text=True).stdout.strip()
-    last = subprocess.run(["git", "-C", cwd, "log", "-1", "--format=%s"], capture_output=True, text=True).stdout.strip()
-    send("Autofix session is waiting", f"Branch {branch}: {last or 'no commits yet'}\n{attach}")
+    ahead = subprocess.run(["git", "-C", cwd, "rev-list", "--count", "origin/main..HEAD"], capture_output=True, text=True).stdout.strip()
+    if ahead and ahead != "0":
+        last = subprocess.run(["git", "-C", cwd, "log", "-1", "--format=%s"], capture_output=True, text=True).stdout.strip()
+        detail = f"{ahead} commit(s) on {branch}, latest: {last}"
+    else:
+        detail = "No code changes were made (see ~/.csa-tests/fix-summary.md)."
+    send("Autofix session finished", f"{detail}\n{attach}")
 
 
 if __name__ == "__main__":
