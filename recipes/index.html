@@ -1,0 +1,124 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Recipes</title>
+<style>
+  :root { --bg:#f3f1ea; --card:#fff; --text:#1f2a1f; --muted:#6c756a; --line:#e4e1d6; --green:#3b7d3a; --green-d:#2c5f2b; --warn:#b3412b; }
+  @media (prefers-color-scheme: dark) {
+    :root { --bg:#12160f; --card:#1b2118; --text:#e9eee5; --muted:#8e9a8a; --line:#2b3427; --green:#6fbb6a; --green-d:#8ad186; --warn:#ef8a74; }
+  }
+  * { box-sizing: border-box; }
+  [hidden] { display: none !important; }
+  body { margin:0; background:var(--bg); color:var(--text); font:16px/1.45 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif; }
+  main { max-width: 760px; margin: 0 auto; padding: 16px; display: grid; gap: 16px; }
+  .card { background: var(--card); border-radius: 16px; padding: 18px 20px; box-shadow: 0 1px 3px rgba(0,0,0,.08); }
+  h1 { margin: 4px 0 0; font-size: 24px; }
+  h2 { margin: 0 0 12px; font-size: 13px; letter-spacing: .08em; text-transform: uppercase; color: var(--muted); font-weight: 600; }
+  button { font: inherit; border: 0; border-radius: 12px; padding: 12px 18px; background: var(--green); color: #fff; font-weight: 600; cursor: pointer; }
+  button.secondary { background: transparent; color: var(--green-d); border: 1.5px solid var(--green); }
+  button.plain { background: transparent; color: var(--muted); font-weight: 500; padding: 12px 8px; }
+  button:disabled { opacity: .5; cursor: default; }
+  textarea { font: inherit; width: 100%; padding: 10px 12px; border: 1px solid var(--line); border-radius: 10px; background: var(--bg); color: var(--text); resize: vertical; }
+  .row { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; }
+  .err { color: var(--warn); margin: 10px 0 0; }
+  .muted { color: var(--muted); }
+  .recipe { border-top: 1px solid var(--line); padding: 16px 0; }
+  .recipe:first-of-type { border-top: 0; padding-top: 0; }
+  .recipe h3 { margin: 0; font-size: 19px; }
+  .recipe .meta { color: var(--muted); font-size: 14px; margin: 2px 0 8px; }
+  .recipe details summary { cursor: pointer; color: var(--green-d); font-weight: 600; margin: 8px 0; }
+  .recipe ul, .recipe ol { margin: 6px 0 10px; padding-left: 22px; }
+  .recipe li.box { font-weight: 600; }
+  .pinned { outline: 2px solid var(--green); outline-offset: 8px; border-radius: 4px; }
+  .badge { display:inline-block; background: var(--green); color:#fff; border-radius: 8px; padding: 1px 8px; font-size: 12px; font-weight: 600; margin-left: 8px; vertical-align: middle; }
+  .spin { display: inline-block; width: 14px; height: 14px; border: 2px solid currentColor; border-right-color: transparent; border-radius: 50%; animation: s .8s linear infinite; vertical-align: -2px; margin-right: 8px; }
+  @keyframes s { to { transform: rotate(360deg); } }
+</style>
+</head>
+<body>
+<main>
+  <header><h1>👩‍🍳 Recipes</h1><div class="muted">Put a recipe on the e-ink display.</div></header>
+
+  <section class="card" id="pinbar" hidden></section>
+
+  <section class="card">
+    <h2>Paste a recipe</h2>
+    <div class="muted" style="margin-bottom:8px">Paste one from anywhere, messy is fine. Claude tidies it up for the display.</div>
+    <textarea id="pasted" rows="6" placeholder="Paste the recipe text here…"></textarea>
+    <div class="row" style="margin-top:12px">
+      <button id="fmtShow">Format &amp; show on display</button>
+      <button class="secondary" id="fmtOnly">Format only</button>
+      <span class="muted" id="status"></span>
+    </div>
+    <div class="err" id="err"></div>
+  </section>
+
+  <section class="card" id="savedCard" hidden>
+    <h2>Saved recipes</h2>
+    <div id="saved"></div>
+  </section>
+</main>
+<script>
+const $ = id => document.getElementById(id);
+const esc = s => String(s ?? "").replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+let S = { pinned: null, saved: [] };
+
+async function api(path, body) {
+  const r = await fetch(path, body === undefined ? {} : { method: "POST", body: JSON.stringify(body) });
+  const j = await r.json();
+  if (!r.ok) throw new Error(j.error || "Request failed");
+  return j;
+}
+function setBusy(msg) {
+  $("status").innerHTML = msg ? `<span class="spin"></span>${esc(msg)}` : "";
+  document.querySelectorAll("button").forEach(b => b.disabled = !!msg);
+}
+async function run(msg, fn) {
+  $("err").textContent = "";
+  setBusy(msg);
+  try { S = await fn(); } catch (e) { $("err").textContent = e.message; }
+  setBusy("");
+  render();
+}
+const isPinned = r => S.pinned && S.pinned.title === r.title;
+function card(r, n) {
+  return `<div class="recipe ${isPinned(r) ? "pinned" : ""}">
+    <h3>${esc(r.title)}${isPinned(r) ? '<span class="badge">On display</span>' : ""}</h3>
+    <div class="meta">${[r.servings && r.servings + " servings", r.minutes && r.minutes + " min"].filter(Boolean).join(" · ")}</div>
+    <details><summary>Ingredients &amp; steps</summary>
+      <ul>${r.ingredients.map(i => `<li class="${i.from_box ? "box" : ""}">${esc(i.item)}</li>`).join("")}</ul>
+      <ol>${r.steps.map(s => `<li>${esc(s)}</li>`).join("")}</ol></details>
+    <div class="row">${isPinned(r)
+      ? `<button class="secondary" data-unpin>Remove from display</button>`
+      : `<button data-pin="${n}">Show on display</button>`}
+      <button class="plain" data-del="${n}">Delete</button></div>
+  </div>`;
+}
+function render() {
+  $("savedCard").hidden = !S.saved.length;
+  $("saved").innerHTML = S.saved.map(card).join("");
+  $("pinbar").hidden = !S.pinned;
+  if (S.pinned) $("pinbar").innerHTML = `<h2>On the e-ink display</h2><b>${esc(S.pinned.title)}</b>
+    <div class="row" style="margin-top:10px"><button class="secondary" data-unpin>Remove from display</button></div>`;
+}
+for (const [id, show] of [["fmtShow", true], ["fmtOnly", false]]) $(id).onclick = () => {
+  const text = $("pasted").value;
+  if (text.trim().length < 20) { $("err").textContent = "Paste the recipe text first."; return; }
+  return run("Formatting the recipe… (about 20 seconds)", async () => {
+    const s = await api("api/format", { text, show });
+    $("pasted").value = "";
+    return s;
+  });
+};
+document.addEventListener("click", e => {
+  const t = e.target;
+  if (t.dataset.pin !== undefined) run("Sending to the display…", () => api("api/pin", { index: Number(t.dataset.pin) }));
+  if (t.dataset.unpin !== undefined) run("Removing…", () => api("api/pin", { index: null }));
+  if (t.dataset.del !== undefined && confirm("Delete this saved recipe?")) run("Deleting…", () => api("api/delete", { index: Number(t.dataset.del) }));
+});
+api("api/state").then(s => { S = s; render(); }).catch(() => {});
+</script>
+</body>
+</html>

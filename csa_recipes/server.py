@@ -1,16 +1,15 @@
 #!/usr/bin/env python3
-"""CSA Recipes: photo of a CSA delivery letter -> ingredient list -> recipe ideas -> one pinned for the e-ink display.
+"""CSA Recipes: photo of a CSA delivery letter -> ingredient list -> recipe ideas -> one sent to the Recipes add-on for the e-ink display.
 
 Reading the letter and writing recipes is done by Claude Code on the mini PC, through the CSA helper service
 (csa_helper/). State lives in /data/state.json.
 
   GET  /              web UI (works behind Home Assistant ingress: all links are relative)
-  GET  /api/state     {items, recipes, pinned}
+  GET  /api/state     {items, recipes, pinned}   (pinned is read live from the Recipes add-on)
   POST /api/letter    image bytes -> reads the letter, replaces items
   POST /api/items     {items: [...]} user-corrected ingredient list
   POST /api/recipes   generates recipe ideas from the current items
-  POST /api/pin       {index: N} pin recipe N (or {index: null} to unpin)
-  GET  /pinned.json   {recipe: {...} | null}, polled by the display add-on
+  POST /api/pin       {index: N} send recipe N to the Recipes add-on to show on the display ({index: null} to clear)
 """
 from __future__ import annotations
 
@@ -27,7 +26,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from PIL import Image, ImageOps
 
 log = logging.getLogger("csa")
-DEFAULTS = {"todo_entity": "todo.non_costco_list", "display_url": "", "helper_url": "", "helper_token": "", "recipe_count": 4, "dietary_notes": ""}
+DEFAULTS = {"todo_entity": "todo.non_costco_list", "recipes_url": "", "helper_url": "", "helper_token": "", "recipe_count": 4, "dietary_notes": ""}
 
 def load_options(path: str | None) -> dict:
     opts = dict(DEFAULTS)
@@ -147,30 +146,44 @@ def send_to_todo(opts: dict, grocery: list[dict]) -> dict:
     return {"added": added, "skipped": skipped, "list": entity}
 
 
-def poke_display(opts: dict) -> None:
-    """Tell the display add-on to re-read the pinned recipe now instead of at its next poll."""
-    if not opts["display_url"]:
-        return
+def recipes_call(opts: dict, path: str, body: dict | None = None):
+    """Talk to the Recipes add-on, which owns what is shown on the e-ink display."""
+    if not opts["recipes_url"]:
+        raise UserError("Set recipes_url in the add-on options (the Recipes add-on).")
+    req = urllib.request.Request(opts["recipes_url"].rstrip("/") + path,
+                                 data=None if body is None else json.dumps(body).encode())
     try:
-        urllib.request.urlopen(opts["display_url"].rstrip("/") + "/refresh-recipe", timeout=5).read()
-    except Exception as exc:
-        log.warning("Couldn't notify the display (it will pick the change up within a minute): %s", exc)
+        with urllib.request.urlopen(req, timeout=15) as r:
+            return json.load(r)
+    except urllib.error.HTTPError as exc:
+        try:
+            msg = json.loads(exc.read()).get("error", "")
+        except ValueError:
+            msg = ""
+        raise UserError(f"The Recipes add-on said no: {msg or exc.code}") from exc
+    except (urllib.error.URLError, TimeoutError) as exc:
+        raise UserError("Couldn't reach the Recipes add-on. Is it installed and running?") from exc
+
+
+def pinned_recipe(opts: dict):
+    try:
+        return recipes_call(opts, "/api/state")["pinned"]
+    except Exception:
+        return None
 
 
 class State:
     def __init__(self, path: str):
         self.path, self.lock = path, threading.Lock()
-        self.data = {"items": [], "recipes": [], "pinned": None, "request": "", "meals": 5,
-                     "grocery": [], "removed": [], "on_hand": "", "custom": []}   # pinned: a copy of the recipe on the display
+        self.data = {"items": [], "recipes": [], "request": "", "meals": 5, "grocery": [], "removed": [], "on_hand": ""}
         if os.path.exists(path):
             try:
                 with open(path) as f:
                     self.data.update(json.load(f))
             except (OSError, ValueError):
                 log.warning("Ignoring unreadable %s", path)
-        p = self.data["pinned"]
-        if isinstance(p, int):          # older versions stored an index into recipes
-            self.data["pinned"] = self.data["recipes"][p] if p < len(self.data["recipes"]) else None
+        for old in ("pinned", "custom"):        # these moved to the Recipes add-on
+            self.data.pop(old, None)
 
     def save(self) -> None:
         tmp = self.path + ".tmp"
@@ -208,6 +221,8 @@ class Handler(BaseHTTPRequestHandler):
         self.wfile.write(body)
 
     def _json(self, obj, code: int = 200):
+        if isinstance(obj, dict) and "recipes" in obj and "pinned" not in obj:
+            obj = {**obj, "pinned": pinned_recipe(self.opts)}
         self._send(code, json.dumps(obj).encode())
 
     def _body(self) -> bytes:
@@ -218,9 +233,7 @@ class Handler(BaseHTTPRequestHandler):
         if path in ("/", "/index.html"):
             return self._send(200, PAGE.encode(), "text/html")
         if path == "/api/state":
-            return self._json(self.state.snapshot())
-        if path == "/pinned.json":
-            return self._json({"recipe": self.state.snapshot()["pinned"]})
+            return self._json({**self.state.snapshot(), "pinned": pinned_recipe(self.opts)})
         self._send(404, b"not found", "text/plain")
 
     def do_POST(self):
@@ -249,24 +262,6 @@ class Handler(BaseHTTPRequestHandler):
                            for g in req["grocery"] if str(g.get("item", "")).strip()]
                 return self._json(self.state.update(grocery=grocery, removed=[str(x) for x in req.get("removed", [])],
                                                     on_hand=str(req.get("on_hand", ""))[:500]))
-            if path == "/api/format":
-                req = json.loads(body)
-                text = str(req.get("text", "")).strip()
-                if len(text) < 20:
-                    raise UserError("Paste the recipe text first.")
-                st = self.state.snapshot()
-                out = helper(self.opts, "/format", json.dumps({"text": text, "items": st["items"]}).encode(), "application/json")
-                recipe = clean_recipes([out["recipe"]])
-                if not recipe:
-                    raise UserError("Couldn't find a recipe in that text.")
-                recipe = recipe[0]
-                custom = [recipe] + [r for r in st["custom"] if r["title"] != recipe["title"]][:9]
-                if req.get("show"):
-                    result = self.state.update(custom=custom, pinned=recipe)
-                    poke_display(self.opts)
-                else:
-                    result = self.state.update(custom=custom)
-                return self._json(result)
             if path == "/api/send-grocery":
                 return self._json(send_to_todo(self.opts, self.state.snapshot()["grocery"]))
             if path == "/api/revise":
@@ -276,21 +271,12 @@ class Handler(BaseHTTPRequestHandler):
                 plan = make_plan(self.opts, st, request, st["meals"], revise=True)
                 return self._json(self.state.update(request=request, **plan))
             if path == "/api/pin":
-                req = json.loads(body)
-                if isinstance(req.get("recipe"), dict):         # a recipe that isn't from the plan (e.g. pasted in)
-                    custom = clean_recipes([req["recipe"]])
-                    if not custom:
-                        raise UserError("That recipe needs a title, ingredients and steps.")
-                    result = self.state.update(pinned=custom[0])
-                    poke_display(self.opts)
-                    return self._json(result)
-                idx = req.get("index")
-                s = self.state.snapshot()
-                if idx is not None and not (isinstance(idx, int) and 0 <= idx < len(s["recipes"])):
+                idx = json.loads(body).get("index")
+                recipes = self.state.snapshot()["recipes"]
+                if idx is not None and not (isinstance(idx, int) and 0 <= idx < len(recipes)):
                     raise UserError("No such recipe.")
-                result = self.state.update(pinned=None if idx is None else s["recipes"][idx])
-                poke_display(self.opts)
-                return self._json(result)
+                out = recipes_call(self.opts, "/api/pin", {"index": None} if idx is None else {"recipe": recipes[idx]})
+                return self._json({**self.state.snapshot(), "pinned": out["pinned"]})
         except UserError as exc:
             return self._json({"error": str(exc)}, 400)
         except Exception as exc:

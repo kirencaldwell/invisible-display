@@ -1,0 +1,29 @@
+name: Recipes
+version: "0.1.0"
+slug: recipes
+description: Paste any recipe, have Claude tidy it up, and show it on the e-ink display
+arch:
+  - aarch64
+  - amd64
+startup: application
+boot: auto
+init: false
+ingress: true
+ingress_port: 8080
+panel_icon: mdi:chef-hat
+panel_title: Recipes
+panel_admin: false
+ports:
+  8080/tcp: 8103
+ports_description:
+  8080/tcp: Pinned recipe JSON for the e-ink display (/pinned.json)
+options:
+  helper_url: ""
+  helper_token: ""
+  display_url: http://abd13010-invisible-display:8080
+  csa_url: http://abd13010-csa-recipes:8080
+schema:
+  helper_url: str
+  helper_token: password
+  display_url: str?
+  csa_url: str?
