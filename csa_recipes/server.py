@@ -27,7 +27,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from PIL import Image, ImageOps
 
 log = logging.getLogger("csa")
-DEFAULTS = {"display_url": "", "helper_url": "", "helper_token": "", "recipe_count": 4, "dietary_notes": ""}
+DEFAULTS = {"todo_entity": "todo.non_costco_list", "display_url": "", "helper_url": "", "helper_token": "", "recipe_count": 4, "dietary_notes": ""}
 
 def load_options(path: str | None) -> dict:
     opts = dict(DEFAULTS)
@@ -110,6 +110,41 @@ def make_plan(opts: dict, st: dict, request: str, meals: int, revise: bool = Fal
     if revise:                                  # what they have is now baked into the plan; remember it as on hand
         plan["on_hand"] = ", ".join(body["have"])
     return plan
+
+
+HA_URL = "http://supervisor/core" if os.environ.get("SUPERVISOR_TOKEN") else os.environ.get("HA_URL", "").rstrip("/")
+HA_TOKEN = os.environ.get("SUPERVISOR_TOKEN") or os.environ.get("HA_TOKEN", "")
+
+
+def ha_call(path: str, body: dict):
+    req = urllib.request.Request(HA_URL + path, data=json.dumps(body).encode(), headers={
+        "Authorization": f"Bearer {HA_TOKEN}", "Content-Type": "application/json"})
+    with urllib.request.urlopen(req, timeout=30) as r:
+        return json.load(r)
+
+
+def send_to_todo(opts: dict, grocery: list[dict]) -> dict:
+    """Add the items still to buy to a Home Assistant to-do list (e.g. Todoist), skipping ones already on it."""
+    entity = opts["todo_entity"]
+    if not (entity and HA_TOKEN):
+        raise UserError("Set todo_entity in the add-on options to the to-do list that should get the shopping list.")
+    want = [g["item"] for g in grocery if not g.get("have")]
+    if not want:
+        raise UserError("Nothing left to buy: every item is ticked as already had.")
+    try:
+        resp = ha_call("/api/services/todo/get_items?return_response",
+                       {"entity_id": entity, "status": "needs_action"})
+        existing = {i["summary"].strip().lower() for i in resp["service_response"][entity]["items"]}
+        added = skipped = 0
+        for item in want:
+            if item.strip().lower() in existing:
+                skipped += 1
+                continue
+            ha_call("/api/services/todo/add_item", {"entity_id": entity, "item": item})
+            added += 1
+    except urllib.error.URLError as exc:
+        raise UserError(f"Couldn't add to {entity}: {exc}") from exc
+    return {"added": added, "skipped": skipped, "list": entity}
 
 
 def poke_display(opts: dict) -> None:
@@ -214,6 +249,8 @@ class Handler(BaseHTTPRequestHandler):
                            for g in req["grocery"] if str(g.get("item", "")).strip()]
                 return self._json(self.state.update(grocery=grocery, removed=[str(x) for x in req.get("removed", [])],
                                                     on_hand=str(req.get("on_hand", ""))[:500]))
+            if path == "/api/send-grocery":
+                return self._json(send_to_todo(self.opts, self.state.snapshot()["grocery"]))
             if path == "/api/revise":
                 req = json.loads(body) if body else {}
                 st = self.state.snapshot()

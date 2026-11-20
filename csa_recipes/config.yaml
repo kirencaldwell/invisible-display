@@ -1,5 +1,5 @@
 name: CSA Recipes
-version: "0.5.0"
+version: "0.6.0"
 slug: csa_recipes
 description: Photograph your CSA delivery letter, get recipe ideas, and pin one to the e-ink display
 arch:
@@ -8,6 +8,7 @@ arch:
 startup: application
 boot: auto
 init: false
+homeassistant_api: true
 ingress: true
 ingress_port: 8080
 panel_icon: mdi:food-apple
@@ -18,12 +19,14 @@ ports:
 ports_description:
   8080/tcp: Pinned recipe JSON for the e-ink display (/pinned.json)
 options:
+  todo_entity: todo.non_costco_list
   display_url: http://abd13010-invisible-display:8080
   helper_url: ""
   helper_token: ""
   recipe_count: 4
   dietary_notes: ""
 schema:
+  todo_entity: str?
   display_url: str?
   helper_url: str
   helper_token: password

@@ -100,7 +100,11 @@
     </div>
     <label class="muted" for="onhand" style="display:block;margin:10px 0 6px">Other things we have on hand (comma separated)</label>
     <input id="onhand" placeholder="e.g. rice, chicken thighs, coconut milk">
-    <div class="row" style="margin-top:12px"><button id="revise">Revise plan around this</button></div>
+    <div class="row" style="margin-top:12px">
+      <button id="revise">Revise plan around this</button>
+      <button class="secondary" id="sendG">Send to Non-Costco list</button>
+    </div>
+    <div class="muted" id="sendMsg" style="margin-top:8px"></div>
   </section>
 </main>
 <script>
@@ -239,6 +243,16 @@ $("addGBtn").onclick = async () => {
   render(); await saveGrocery(); render();
 };
 $("onhand").addEventListener("change", saveGrocery);
+$("sendG").onclick = async () => {
+  $("sendMsg").textContent = ""; $("err").textContent = "";
+  setBusy("Sending to the list…");
+  try {
+    await saveGrocery();
+    const r = await api("api/send-grocery", {});
+    $("sendMsg").textContent = `Added ${r.added} item${r.added === 1 ? "" : "s"}` + (r.skipped ? ` (${r.skipped} already on the list)` : "") + ".";
+  } catch (e) { $("err").textContent = e.message; }
+  setBusy(""); render();
+};
 $("revise").onclick = () => run("Revising the plan… (about a minute)", async () => {
   await saveGrocery();
   return api("api/revise", { request: $("request").value });
