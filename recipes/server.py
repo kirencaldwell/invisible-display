@@ -71,6 +71,10 @@ def clean_recipe(r: dict) -> dict | None:
     return rec if rec["title"] and rec["ingredients"] and rec["steps"] else None
 
 
+def opts_url(opts: dict, key: str) -> str:
+    return (opts.get(key) or "http://invalid.invalid").rstrip("/")
+
+
 def csa_items(opts: dict) -> list[dict]:
     """The current CSA box contents (best effort), so the formatter can mark which ingredients came from the box."""
     if not opts["csa_url"]:
@@ -146,6 +150,16 @@ class Handler(BaseHTTPRequestHandler):
         path = self.path.split("?")[0]
         if path in ("/", "/index.html"):
             return self._send(200, PAGE.encode(), "text/html")
+        if path == "/health":
+            ok = {}
+            for name, url in (("helper_ok", opts_url(self.opts, "helper_url") + "/health"),
+                              ("display_ok", opts_url(self.opts, "display_url") + "/health")):
+                try:
+                    with urllib.request.urlopen(url, timeout=5) as resp:
+                        ok[name] = resp.status == 200
+                except Exception:
+                    ok[name] = False
+            return self._json(ok)
         if path == "/api/state":
             return self._json(self.state.snapshot())
         if path == "/pinned.json":

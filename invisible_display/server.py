@@ -105,6 +105,7 @@ class Data:
         self.weather: ha.Weather | None = None
         self.lists: dict[str, list[str]] = {}
         self.recipe: dict | None = None
+        self.core_version = ""
         self.configured = False
         self.lock = threading.Lock()
 
@@ -117,6 +118,7 @@ class Data:
             self.configured = True
             return
         cfg = self.ha.config()
+        self.core_version = cfg.get("version", "")
         self.tz = ZoneInfo(cfg.get("time_zone") or "UTC")
         self.location = cfg.get("location_name", "")
         defs = [dict(c) for c in self.opts["calendars"]]
@@ -138,6 +140,14 @@ class Data:
         log.info("Using calendars: %s", ", ".join(f"{d['tag']}={d['entity_id']}" for d in defs))
 
     # -- refresh ---------------------------------------------------------
+    def refresh_core_version(self) -> None:
+        if self.demo:
+            return
+        try:
+            self.core_version = self.ha.config().get("version", self.core_version)
+        except Exception as exc:
+            log.warning("Couldn't read the Home Assistant version: %s", exc)
+
     def refresh_calendars(self) -> None:
         if self.demo:
             now = dt.datetime.now(self.tz)
@@ -196,6 +206,15 @@ class Data:
                 log.info("pinned recipe: %s", recipe["title"] if recipe else "(none)")
             self.recipe = recipe
 
+    def health(self) -> dict:
+        """What the periodic test routine checks: is each data source loaded, and which HA version are we talking to."""
+        with self.lock:
+            out = {"core_version": self.core_version, "configured": self.configured,
+                   "calendar_events": None if not self.cal_events else sum(len(v) for v in self.cal_events.values()),
+                   "weather": None if self.weather is None else {"hours": len(self.weather.hours), "days": len(self.weather.days)},
+                   "lists": {k: len(v) for k, v in self.lists.items()}}
+        return out
+
     def pinned_recipe(self) -> dict | None:
         with self.lock:
             return self.recipe
@@ -251,6 +270,7 @@ class Data:
                 cal_every = self.opts["calendar_refresh_minutes"] * 60
                 wx_every = self.opts["weather_refresh_minutes"] * 60
                 if now - last_cal >= cal_every:
+                    self.refresh_core_version()
                     self.refresh_calendars()
                     # nothing fetched yet -> retry in 30 s instead of waiting a full interval
                     last_cal = now if self.events() is not None else now - cal_every + 30
@@ -339,6 +359,9 @@ class Handler(BaseHTTPRequestHandler):
                 self.state["pending"] = digest
             log.info("render %-8s sending %d bytes", page, len(buf))
             return self._send(200, buf, headers=headers)
+
+        if url.path == "/health":
+            return self._send(200, json.dumps(self.frames.data.health()).encode(), "application/json")
 
         if url.path == "/refresh-recipe":       # the CSA Recipes add-on calls this right after (un)pinning
             if self.frames.opts["recipe_url"]:

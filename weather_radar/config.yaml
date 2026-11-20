@@ -1,5 +1,5 @@
 name: Weather Radar
-version: "0.2.1"
+version: "0.3.0"
 slug: weather_radar
 description: Weather forecast and animated NEXRAD radar for your location
 arch:

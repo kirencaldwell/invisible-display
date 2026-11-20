@@ -279,6 +279,10 @@ class Handler(BaseHTTPRequestHandler):
             cg, frames, updated, wx = r.color_gif, r.frames, r.updated, r.weather
         if path in ("/", "/index.html"):
             return self._send(200, PAGE.encode(), "text/html")
+        if path == "/health":
+            return self._send(200, json.dumps({"radar_frames": len(frames), "weather": bool(wx and wx.get("state")),
+                                               "updated": updated.isoformat() if updated else None}).encode(),
+                              "application/json")
         if path == "/weather.json":
             body = json.dumps({"weather": wx, "updated": updated.isoformat() if updated else None})
             return self._send(200, body.encode(), "application/json")

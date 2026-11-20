@@ -116,7 +116,7 @@ HA_TOKEN = os.environ.get("SUPERVISOR_TOKEN") or os.environ.get("HA_TOKEN", "")
 
 
 def ha_call(path: str, body: dict):
-    req = urllib.request.Request(HA_URL + path, data=json.dumps(body).encode(), headers={
+    req = urllib.request.Request(HA_URL + path, data=None if body is None else json.dumps(body).encode(), headers={
         "Authorization": f"Bearer {HA_TOKEN}", "Content-Type": "application/json"})
     with urllib.request.urlopen(req, timeout=30) as r:
         return json.load(r)
@@ -170,6 +170,26 @@ def pinned_recipe(opts: dict):
         return recipes_call(opts, "/api/state")["pinned"]
     except Exception:
         return None
+
+
+def health(opts: dict) -> dict:
+    """What the periodic test routine checks: can we reach the mini PC helper, the Recipes add-on and the to-do list?"""
+    out = {}
+    try:
+        with urllib.request.urlopen(opts["helper_url"].rstrip("/") + "/health", timeout=5) as r:
+            out["helper_ok"] = bool(json.load(r).get("ok"))
+    except Exception:
+        out["helper_ok"] = False
+    try:
+        recipes_call(opts, "/api/state")
+        out["recipes_ok"] = True
+    except Exception:
+        out["recipes_ok"] = False
+    try:
+        out["todo_ok"] = ha_call(f"/api/states/{opts['todo_entity']}", None)["state"] not in ("unavailable", "unknown")
+    except Exception:
+        out["todo_ok"] = False
+    return out
 
 
 class State:
@@ -232,6 +252,8 @@ class Handler(BaseHTTPRequestHandler):
         path = self.path.split("?")[0]
         if path in ("/", "/index.html"):
             return self._send(200, PAGE.encode(), "text/html")
+        if path == "/health":
+            return self._json(health(self.opts))
         if path == "/api/state":
             return self._json({**self.state.snapshot(), "pinned": pinned_recipe(self.opts)})
         self._send(404, b"not found", "text/plain")
