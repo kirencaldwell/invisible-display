@@ -1,5 +1,5 @@
 name: Recipes
-version: "0.1.0"
+version: "0.1.1"
 slug: recipes
 description: Paste any recipe, have Claude tidy it up, and show it on the e-ink display
 arch:

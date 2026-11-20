@@ -1,4 +1,4 @@
-FROM alpine:3.20
+FROM alpine:3.24
 RUN apk add --no-cache python3 py3-pillow tzdata font-dejavu
 WORKDIR /app
 COPY radar.py index.html /app/
