@@ -88,14 +88,28 @@ def fold_twice_daily(raw: list[dict]) -> list[dict]:
     return list(days.values())
 
 
+def current_condition(hourly: list[dict]) -> str:
+    now = dt.datetime.now().astimezone()
+    best = ""
+    for h in hourly:
+        try:
+            if dt.datetime.fromisoformat(h["datetime"]) <= now:
+                best = h.get("condition", best)
+            else:
+                break
+        except (KeyError, ValueError):
+            continue
+    return best or (hourly[0].get("condition", "") if hourly else "")
+
+
 def fetch_weather(opts: dict) -> dict:
     for eid in (opts["weather_entity"], opts["weather_fallback_entity"]):
         if not eid:
             continue
         try:
             state = ha_request(f"/api/states/{eid}")
-            if state["state"] in ("unavailable", "unknown"):
-                log.warning("Weather %s is %s", eid, state["state"])
+            if state["state"] == "unavailable":
+                log.warning("Weather %s is unavailable", eid)
                 continue
             out = {"entity": eid, "state": state["state"], "attributes": state["attributes"], "hourly": [], "daily": []}
             try:
@@ -109,6 +123,10 @@ def fetch_weather(opts: dict) -> dict:
                     out["daily"] = fold_twice_daily(ha_forecast(eid, "twice_daily"))
                 except Exception as exc:
                     log.warning("Daily forecast unavailable for %s: %s", eid, exc)
+            if state["state"] == "unknown":
+                # Some sources (e.g. NWS weather stations) report temperature but no current condition;
+                # take it from the forecast entry for the current hour instead.
+                out["state"] = current_condition(out["hourly"]) or "cloudy"
             return out
         except Exception as exc:
             log.warning("Weather %s failed: %s", eid, exc)
