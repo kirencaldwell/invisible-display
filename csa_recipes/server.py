@@ -258,7 +258,15 @@ class Handler(BaseHTTPRequestHandler):
                 plan = make_plan(self.opts, st, request, st["meals"], revise=True)
                 return self._json(self.state.update(request=request, **plan))
             if path == "/api/pin":
-                idx = json.loads(body).get("index")
+                req = json.loads(body)
+                if isinstance(req.get("recipe"), dict):         # a recipe that isn't from the plan (e.g. pasted in)
+                    custom = clean_recipes([req["recipe"]])
+                    if not custom:
+                        raise UserError("That recipe needs a title, ingredients and steps.")
+                    result = self.state.update(pinned=custom[0])
+                    poke_display(self.opts)
+                    return self._json(result)
+                idx = req.get("index")
                 s = self.state.snapshot()
                 if idx is not None and not (isinstance(idx, int) and 0 <= idx < len(s["recipes"])):
                     raise UserError("No such recipe.")
