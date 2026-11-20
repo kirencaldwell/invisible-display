@@ -1,0 +1,25 @@
+{
+  "permissions": {
+    "allow": [
+      "Read", "Glob", "Grep", "Edit", "Write",
+      "Bash(git status:*)", "Bash(git diff:*)", "Bash(git log:*)", "Bash(git show:*)", "Bash(git add:*)",
+      "Bash(git commit:*)", "Bash(git checkout:*)", "Bash(git branch:*)", "Bash(git stash:*)",
+      "Bash(python3:*)", "Bash(/home/kirencaldwell/.csa-tests/venv/bin/python:*)",
+      "Bash(ls:*)", "Bash(cat:*)", "Bash(grep:*)", "Bash(find:*)", "Bash(head:*)", "Bash(tail:*)", "Bash(wc:*)",
+      "Bash(curl -s http://192.168.4.54:*)", "Bash(curl -s http://localhost:*)"
+    ],
+    "deny": [
+      "Bash(git push:*)", "Bash(sudo:*)", "Bash(ssh:*)", "Bash(scp:*)", "Bash(rm -rf:*)",
+      "Read(/home/kirencaldwell/.ssh/**)", "Read(/home/kirencaldwell/.csa-helper/token)", "Read(/home/kirencaldwell/.csa-tests/alert-url)"
+    ]
+  },
+  "hooks": {
+    "Notification": [
+      {"matcher": "permission_prompt",
+       "hooks": [{"type": "command", "command": "python3 /home/kirencaldwell/.csa-tests/ops/alert.py --hook approval"}]}
+    ],
+    "Stop": [
+      {"hooks": [{"type": "command", "command": "python3 /home/kirencaldwell/.csa-tests/ops/alert.py --hook done"}]}
+    ]
+  }
+}

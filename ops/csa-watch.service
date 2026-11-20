@@ -1,0 +1,6 @@
+[Unit]
+Description=Test the Home Assistant add-ons when HA updates
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/python3 %h/.csa-tests/ops/watch.py
