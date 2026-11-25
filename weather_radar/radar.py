@@ -200,10 +200,11 @@ def _font(px: int, bold=False):
 
 def stamp(img: Image.Image, text: str, fill=(255, 255, 255)) -> None:
     d = ImageDraw.Draw(img)
-    f = _font(16, True)
+    px = max(16, round(img.width / 28))                    # scales with the picture: readable when shrunk to a phone
+    f = _font(px, True)
     tw = d.textlength(text, font=f)
-    d.rectangle((6, 6, 18 + tw, 32), fill=fill, outline=(60, 60, 60))
-    d.text((12, 8), text, font=f, fill=(30, 30, 30))
+    d.rectangle((6, 6, 18 + tw, 12 + px * 1.5), fill=fill, outline=(60, 60, 60))
+    d.text((12, 8 + px // 8), text, font=f, fill=(30, 30, 30))
 
 
 def marker(img: Image.Image) -> None:

@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
 <title>Weather</title>
 <style>
   :root {
@@ -13,10 +13,12 @@
     :root { --bg: #11151b; --card: #1a2029; --text: #e8edf3; --muted: #8b97a8; --line: #2a3340; --accent: #5aa2ff; }
   }
   * { box-sizing: border-box; }
-  body { margin: 0; background: var(--bg); color: var(--text);
+  html { -webkit-text-size-adjust: 100%; }
+  body { margin: 0; background: var(--bg); color: var(--text); overflow-x: hidden;
          font: 16px/1.4 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
   main { max-width: 1100px; margin: 0 auto; padding: 16px; display: grid; gap: 16px;
-         grid-template-columns: 1fr 1fr; }
+         grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); }
+  main > * { min-width: 0; }                 /* a wide child (the hourly strip) must scroll, not stretch the page */
   .card { background: var(--card); border-radius: 16px; padding: 18px 20px; box-shadow: 0 1px 3px rgba(0,0,0,.08); }
   .wide { grid-column: 1 / -1; }
   h2 { margin: 0 0 12px; font-size: 13px; font-weight: 600; letter-spacing: .08em; text-transform: uppercase; color: var(--muted); }
@@ -30,7 +32,9 @@
   .stat { background: var(--bg); border-radius: 12px; padding: 10px 12px; }
   .stat b { display: block; font-size: 18px; font-weight: 600; }
   .stat span { font-size: 12px; color: var(--muted); }
-  .hours { display: flex; gap: 4px; overflow-x: auto; padding-bottom: 6px; }
+  .hours { display: flex; gap: 4px; overflow-x: auto; padding-bottom: 6px; scroll-snap-type: x proximity; -webkit-overflow-scrolling: touch; scrollbar-width: none; }
+  .hours::-webkit-scrollbar { display: none; }
+  .hour { scroll-snap-align: start; }
   .hour { flex: 0 0 64px; text-align: center; padding: 8px 0; border-radius: 12px; }
   .hour:first-child { background: var(--bg); }
   .hour .t { font-size: 13px; color: var(--muted); }
@@ -50,14 +54,35 @@
   .radar img { width: 100%; border-radius: 12px; display: block; }
   .foot { text-align: center; color: var(--muted); font-size: 12px; padding: 0 0 16px; }
   .msg { color: var(--muted); padding: 24px 0; text-align: center; }
-  @media (max-width: 800px) { main { grid-template-columns: 1fr; } .now .temp { font-size: 60px; } }
+  @media (max-width: 800px) {
+    main { grid-template-columns: minmax(0, 1fr); }
+    .now .temp { font-size: 60px; }
+  }
+  /* phones: tighter padding, radar right after the current conditions, bigger tap-friendly text, safe areas */
+  @media (max-width: 600px) {
+    main { padding: 10px max(10px, env(safe-area-inset-right)) 10px max(10px, env(safe-area-inset-left)); gap: 10px; }
+    .card { padding: 14px 14px; border-radius: 14px; }
+    h2 { font-size: 12px; margin-bottom: 10px; }
+    #now { order: 1; } .radar { order: 2; } #hourly { order: 3; } #daily { order: 4; }
+    .now { gap: 12px; }
+    .now .icon { font-size: 56px; }
+    .now .temp { font-size: 54px; }
+    .now .temp sup { font-size: 22px; top: 5px; }
+    .now .cond { font-size: 20px; }
+    .now > div:last-child { flex: 1 1 140px; }
+    .stats { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; margin-top: 14px; }
+    .stat b { font-size: 17px; } .stat span { font-size: 13px; }
+    .hour { flex-basis: 58px; } .hour .t { font-size: 13px; } .hour .d { font-size: 16px; }
+    .day { grid-template-columns: 48px 30px 38px minmax(0, 1fr) 76px; gap: 6px; padding: 11px 0; font-size: 15px; }
+    .day .p { font-size: 13px; }
+  }
 </style>
 </head>
 <body>
 <main>
   <section class="card wide" id="now"><div class="msg">Loading weather…</div></section>
-  <section class="card wide"><h2>Next 24 hours</h2><div class="hours" id="hours"></div></section>
-  <section class="card"><h2>7-day forecast</h2><div id="days"></div></section>
+  <section class="card wide" id="hourly"><h2>Next 24 hours</h2><div class="hours" id="hours"></div></section>
+  <section class="card" id="daily"><h2>7-day forecast</h2><div id="days"></div></section>
   <section class="card radar"><h2>Radar · recent past, then forecast</h2><img id="radar" src="radar.gif" alt="Animated radar" onerror="setTimeout(() => this.src = 'radar.gif?t=' + Date.now(), 10000)"></section>
 </main>
 <div class="foot" id="foot"></div>
@@ -129,7 +154,7 @@ function render(data) {
       <div><span class="lo">${deg(lo)}</span> <span class="hi">${deg(hi)}</span></div></div>`;
   }).join("") || '<div class="msg">Daily forecast unavailable</div>';
   $("foot").textContent = "Updated " + new Date(data.updated).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" }) +
-    " · Radar: NOAA NEXRAD via Iowa Environmental Mesonet · Map © OpenStreetMap contributors";
+    " · Radar: Environment and Climate Change Canada · Map © OpenStreetMap contributors";
 }
 
 async function load() {
