@@ -1,9 +1,11 @@
 #!/usr/bin/env python3
 """Animated weather radar server for Home Assistant.
 
-Fetches the last ~50 minutes of NEXRAD composite radar (Iowa Environmental Mesonet tiles, US only), then the next
-`forecast_minutes` of NOAA HRRR simulated radar (also from IEM; a model forecast, labelled FORECAST), over an
-OpenStreetMap basemap and serves it as one animated GIF.
+Fetches the last `past_minutes` of NEXRAD composite radar (Iowa Environmental Mesonet tiles, US only), then looks ahead:
+  - NOWCAST (first ~70 minutes): Environment and Climate Change Canada's radar extrapolation (a PySTEPS motion field moves
+    the latest North American radar composite forward, no growth or decay), recoloured to match the observed frames.
+  - MODEL (after that, up to `forecast_minutes`): NOAA HRRR simulated radar from IEM. Smoother, and a model's guess.
+over an OpenStreetMap basemap, served as one animated GIF.
 
   GET /            -> small viewer page (relative links, so it works behind Home Assistant ingress)
   GET /radar.gif   -> animation
@@ -18,6 +20,7 @@ import json
 import logging
 import math
 import os
+import re
 import threading
 import time
 import urllib.request
@@ -36,8 +39,17 @@ def past_ages(minutes: int) -> list[int]:
     return list(range(min(50, max(0, int(minutes))) // 5 * 5, -1, -5))
 
 DEFAULTS = {"weather_entity": "weather.forecast_home", "weather_fallback_entity": "", "latitude": 0, "longitude": 0, "zoom": 8, "width": 800, "height": 480, "frame_ms": 500,
-            "refresh_minutes": 5, "forecast_minutes": 120, "forecast_step_min": 15,
-            "past_minutes": 20, "forecast_frame_ms": 1000}
+            "refresh_minutes": 5, "forecast_minutes": 180, "forecast_step_min": 15,
+            "past_minutes": 20, "forecast_frame_ms": 1000, "nowcast_minutes": 70}
+ECCC = "https://geo.weather.gc.ca/geomet"
+ECCC_LAYER = "Radar_1km_dBZ-Extrapolation"
+# ECCC's 14 discrete reflectivity classes (style Radar-dBZ_Dis-14colors), lowest first, and a NEXRAD-like colour for each,
+# so the nowcast frames look like the observed ones.
+ECCC_TO_NEXRAD = [((152, 203, 254), (112, 170, 205, 130)), ((0, 152, 254), (53, 214, 91)), ((0, 254, 102), (17, 213, 24)),
+                  ((0, 203, 0), (13, 166, 18)), ((0, 152, 0), (10, 119, 13)), ((0, 102, 0), (8, 98, 10)),
+                  ((254, 254, 0), (255, 255, 0)), ((254, 203, 0), (231, 192, 0)), ((254, 152, 0), (255, 144, 0)),
+                  ((254, 102, 0), (255, 96, 0)), ((254, 0, 0), (255, 0, 0)), ((254, 2, 152), (214, 0, 0)),
+                  ((152, 51, 203), (255, 0, 255)), ((102, 0, 152), (153, 85, 201))]
 
 
 def load_options(path: str | None) -> dict:
@@ -208,18 +220,70 @@ def label(age: int, when: dt.datetime) -> str:
     return f"{when:%-I:%M %p}" + ("  now" if age == 0 else f"  -{age} min")
 
 
-def forecast_label(lead: int, when: dt.datetime) -> str:
-    return f"{when:%-I:%M %p}  +{lead} min  FORECAST"
+def forecast_label(lead: int, when: dt.datetime, kind: str = "MODEL") -> str:
+    return f"{when:%-I:%M %p}  +{lead} min  {kind}"
 
 
-def color_frame(base: Image.Image, rad: Image.Image, text: str, forecast: bool = False) -> Image.Image:
+def eccc_times() -> list[dt.datetime]:
+    """Valid times (UTC) of ECCC's radar extrapolation frames: the latest observation, then 6-minute steps ahead (~70 min)."""
+    url = f"{ECCC}?service=WMS&version=1.3.0&request=GetCapabilities&layer={ECCC_LAYER}"
+    with urllib.request.urlopen(urllib.request.Request(url, headers=UA), timeout=30) as r:
+        xml = r.read().decode("utf-8", "replace")
+    seg = xml[xml.index(f"<Name>{ECCC_LAYER}</Name>"):]
+    m = re.search(r'<Dimension name="time"[^>]*>([^<]*)</Dimension>', seg)
+    start, end, step = m.group(1).strip().split("/")
+    t, t1 = (dt.datetime.fromisoformat(x.replace("Z", "+00:00")) for x in (start, end))
+    mins = int(re.search(r"PT(\d+)M", step).group(1))
+    out = []
+    while t <= t1:
+        out.append(t)
+        t += dt.timedelta(minutes=mins)
+    return out
+
+
+_PAL = None
+
+
+def _nexrad_palette() -> dict:
+    """Map every colour ECCC may draw (the legend colours, +-1 per channel) to its NEXRAD-like colour."""
+    global _PAL
+    if _PAL is None:
+        _PAL = {}
+        for (r, g, b), to in ECCC_TO_NEXRAD:
+            for dr in (0, 1):
+                for dg in (0, 1):
+                    for db in (0, 1):
+                        _PAL[(min(255, r + dr), min(255, g + dg), min(255, b + db))] = to if len(to) == 4 else to + (255,)
+    return _PAL
+
+
+def eccc_frame(when: dt.datetime, cx: float, cy: float, z: int, w: int, h: int) -> Image.Image:
+    """ECCC's extrapolated radar for `when` over the map area (Web Mercator bbox from the pixel window), recoloured."""
+    n = 256 * 2 ** z
+    mx = lambda px: (px / n - 0.5) * 2 * math.pi * 6378137
+    my = lambda py: (0.5 - py / n) * 2 * math.pi * 6378137
+    bbox = f"{mx(cx - w / 2)},{my(cy + h / 2)},{mx(cx + w / 2)},{my(cy - h / 2)}"
+    url = (f"{ECCC}?service=WMS&version=1.3.0&request=GetMap&layers={ECCC_LAYER}&styles=Radar-dBZ_Dis-14colors&crs=EPSG:3857"
+           f"&bbox={bbox}&width={w}&height={h}&format=image/png&transparent=true&time={when:%Y-%m-%dT%H:%M:%SZ}")
+    img = fetch(url)
+    pal, clear = _nexrad_palette(), (0, 0, 0, 0)
+    img.putdata([pal.get(p[:3], p) if p[3] else clear for p in img.getdata()])
+    return img
+
+
+def color_frame(base: Image.Image, rad: Image.Image, text: str, forecast: bool = False, kind: str = "MODEL") -> Image.Image:
     gray = base.convert("L").point(lambda v: 110 + v * 145 // 255).convert("RGBA")     # fade the map
     out = Image.alpha_composite(gray, rad.point(lambda v: v))
     out = out.convert("RGB")
     marker(out)
-    stamp(out, text, fill=(255, 214, 102) if forecast else (255, 255, 255))
-    if forecast:                                                                      # an amber frame: this is a model, not an observation
-        ImageDraw.Draw(out).rectangle((0, 0, out.width - 1, out.height - 1), outline=(255, 170, 0), width=4)
+    tone = (255, 170, 0) if kind == "MODEL" else (80, 170, 255)                       # amber: a model's guess; blue: observed rain moved ahead
+    stamp(out, text, fill=((255, 214, 102) if kind == "MODEL" else (170, 215, 255)) if forecast else (255, 255, 255))
+    if forecast:
+        d = ImageDraw.Draw(out)
+        d.rectangle((0, 0, out.width - 1, out.height - 1), outline=tone, width=4)
+        src = "Nowcast: Environment and Climate Change Canada" if kind == "NOWCAST" else "Model: NOAA HRRR via Iowa Environmental Mesonet"
+        f = _font(11)
+        d.text((10, out.height - 18), src, font=f, fill=(40, 40, 40))
     return out
 
 
@@ -254,6 +318,7 @@ class Radar:
         self.color_gif = b""
         self.frames: list[bytes] = []
         self.n_forecast = 0
+        self.n_nowcast = 0
         self.hrrr_init: dt.datetime | None = None
         self.updated: dt.datetime | None = None
         self.weather: dict | None = None
@@ -287,11 +352,32 @@ class Radar:
         if not color:
             raise RuntimeError("no radar frames could be fetched")
         now_idx = len(color) - 1
-        n_fc, init = 0, None
-        if int(o["forecast_minutes"]) > 0:
+        n_fc, n_nc, init, kmh = 0, 0, None, None
+        step = max(15, int(o["forecast_step_min"]))
+        nc_min = int(o["nowcast_minutes"])
+        last_nc = 0
+        if nc_min > 0:
+            try:
+                times = eccc_times()
+                for lead in range(step, nc_min + 1, step):
+                    when = now + dt.timedelta(minutes=lead)
+                    tv = min(times, key=lambda t: abs((t - when).total_seconds()))
+                    if abs((tv - when).total_seconds()) > 360:                    # ECCC has nothing that far ahead
+                        break
+                    rad = eccc_frame(tv, cx, cy, z, w, h)
+                    cf = color_frame(base, rad, forecast_label(lead, when, "NOWCAST"), forecast=True, kind="NOWCAST")
+                    color.append(cf)
+                    b = io.BytesIO()
+                    cf.save(b, "PNG")
+                    pngs.append(b.getvalue())
+                    n_nc += 1
+                    last_nc = lead
+            except Exception as exc:
+                log.warning("nowcast failed (model frames only): %s", exc)
+        first_model = last_nc + step
+        if int(o["forecast_minutes"]) >= first_model:
             init = hrrr_init()
-            step = max(15, int(o["forecast_step_min"]))
-            for lead in range(step, int(o["forecast_minutes"]) + 1, step) if init else ():
+            for lead in range(first_model, int(o["forecast_minutes"]) + 1, step) if init else ():
                 when = now + dt.timedelta(minutes=lead)
                 f_min = round((when - init).total_seconds() / 60 / 15) * 15      # the model's 15-minute steps
                 if not 0 <= f_min <= 1080:
@@ -301,7 +387,7 @@ class Radar:
                 except Exception as exc:
                     log.warning("forecast frame +%d min failed: %s", lead, exc)
                     continue
-                cf = color_frame(base, rad, forecast_label(lead, when), forecast=True)
+                cf = color_frame(base, rad, forecast_label(lead, when, "MODEL"), forecast=True, kind="MODEL")
                 color.append(cf)
                 b = io.BytesIO()
                 cf.save(b, "PNG")
@@ -310,7 +396,8 @@ class Radar:
         cg = gif(color, o["frame_ms"], now_idx, int(o["forecast_frame_ms"]))
         with self.lock:
             self.color_gif, self.frames, self.n_forecast, self.hrrr_init = cg, pngs, n_fc, init
-        log.info("updated %d frames (%d forecast, model run %s) (%d KB)", len(color), n_fc, init, len(cg) // 1024)
+            self.n_nowcast = n_nc
+        log.info("updated %d frames (%d nowcast, %d model, model run %s) (%d KB)", len(color), n_nc, n_fc, init, len(cg) // 1024)
 
     def run(self) -> None:
         every = self.opts["refresh_minutes"] * 60
@@ -349,7 +436,7 @@ class Handler(BaseHTTPRequestHandler):
         if path in ("/", "/index.html"):
             return self._send(200, PAGE.encode(), "text/html")
         if path == "/health":
-            return self._send(200, json.dumps({"radar_frames": len(frames), "forecast_frames": r.n_forecast,
+            return self._send(200, json.dumps({"radar_frames": len(frames), "forecast_frames": r.n_forecast, "nowcast_frames": r.n_nowcast,
                                                "hrrr_run": r.hrrr_init.isoformat() if r.hrrr_init else None, "weather": bool(wx and wx.get("state")),
                                                "updated": updated.isoformat() if updated else None}).encode(),
                               "application/json")

@@ -1,5 +1,5 @@
 name: Weather Radar
-version: "0.5.0"
+version: "0.6.0"
 slug: weather_radar
 description: Weather forecast and animated NEXRAD radar for your location
 arch:
@@ -27,8 +27,9 @@ options:
   height: 480
   frame_ms: 500
   refresh_minutes: 5
-  forecast_minutes: 120
+  forecast_minutes: 180
   forecast_step_min: 15
+  nowcast_minutes: 70
   past_minutes: 20
   forecast_frame_ms: 1000
 schema:
@@ -42,6 +43,7 @@ schema:
   frame_ms: int(100,3000)
   refresh_minutes: int(2,60)
   forecast_minutes: int(0,360)
+  nowcast_minutes: int(0,120)
   forecast_step_min: int(15,60)
   past_minutes: int(0,50)
   forecast_frame_ms: int(100,5000)
