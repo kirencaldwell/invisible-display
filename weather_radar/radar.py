@@ -31,10 +31,13 @@ IEM = "https://mesonet.agron.iastate.edu/cache/tile.py/1.0.0/nexrad-n0q-900913{s
 HRRR = "https://mesonet.agron.iastate.edu/cache/tile.py/1.0.0/hrrr::REFD-F{f}-{init}/{z}/{x}/{y}.png"
 HRRR_INIT = "https://mesonet.agron.iastate.edu/data/gis/images/4326/hrrr/refd_1080.json"
 OSM = "https://tile.openstreetmap.org/{z}/{x}/{y}.png"
-AGES = list(range(50, -1, -5))            # minutes ago, oldest first; IEM offers m05m..m50m plus the current frame
+def past_ages(minutes: int) -> list[int]:
+    """Minutes ago, oldest first, in 5-minute steps; IEM offers m05m..m50m plus the current frame."""
+    return list(range(min(50, max(0, int(minutes))) // 5 * 5, -1, -5))
 
 DEFAULTS = {"weather_entity": "weather.forecast_home", "weather_fallback_entity": "", "latitude": 0, "longitude": 0, "zoom": 8, "width": 800, "height": 480, "frame_ms": 500,
-            "refresh_minutes": 5, "forecast_minutes": 120, "forecast_step_min": 15}
+            "refresh_minutes": 5, "forecast_minutes": 120, "forecast_step_min": 15,
+            "past_minutes": 20, "forecast_frame_ms": 1000}
 
 
 def load_options(path: str | None) -> dict:
@@ -230,9 +233,12 @@ def hrrr_init() -> dt.datetime | None:
         return None
 
 
-def gif(frames: list[Image.Image], frame_ms: int, now_idx: int | None = None) -> bytes:
+def gif(frames: list[Image.Image], frame_ms: int, now_idx: int | None = None, forecast_ms: int | None = None) -> bytes:
     buf = io.BytesIO()
     durations = [frame_ms] * len(frames)
+    if forecast_ms and now_idx is not None:
+        for i in range(now_idx + 1, len(frames)):
+            durations[i] = forecast_ms                                 # the future gets more time per frame than the past
     durations[-1] = frame_ms * 4                                       # linger on the last frame
     if now_idx is not None and 0 <= now_idx < len(frames) - 1:
         durations[now_idx] = frame_ms * 3                              # and on "now", where observations end and the forecast begins
@@ -265,7 +271,7 @@ class Radar:
         cx, cy = world(self.lat, self.lon, z)
         now = dt.datetime.now().astimezone()
         color, pngs = [], []
-        for age in AGES:
+        for age in past_ages(o["past_minutes"]):
             suffix = f"-m{age:02d}m" if age else ""
             try:
                 rad = mosaic(IEM, z, cx, cy, w, h, suffix=suffix)
@@ -301,7 +307,7 @@ class Radar:
                 cf.save(b, "PNG")
                 pngs.append(b.getvalue())
                 n_fc += 1
-        cg = gif(color, o["frame_ms"], now_idx)
+        cg = gif(color, o["frame_ms"], now_idx, int(o["forecast_frame_ms"]))
         with self.lock:
             self.color_gif, self.frames, self.n_forecast, self.hrrr_init = cg, pngs, n_fc, init
         log.info("updated %d frames (%d forecast, model run %s) (%d KB)", len(color), n_fc, init, len(cg) // 1024)
