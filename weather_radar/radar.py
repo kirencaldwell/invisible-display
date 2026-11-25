@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
 """Animated weather radar server for Home Assistant.
 
-Fetches the last ~50 minutes of NEXRAD composite radar (Iowa Environmental Mesonet tiles, US only) over an
-OpenStreetMap basemap and serves it as an animated GIF.
+Fetches the last ~50 minutes of NEXRAD composite radar (Iowa Environmental Mesonet tiles, US only), then the next
+`forecast_minutes` of NOAA HRRR simulated radar (also from IEM; a model forecast, labelled FORECAST), over an
+OpenStreetMap basemap and serves it as one animated GIF.
 
   GET /            -> small viewer page (relative links, so it works behind Home Assistant ingress)
   GET /radar.gif   -> animation
@@ -27,11 +28,13 @@ from PIL import Image, ImageDraw, ImageFont
 log = logging.getLogger("radar")
 UA = {"User-Agent": "ha-weather-radar-addon (github.com/kirencaldwell/invisible-display)"}
 IEM = "https://mesonet.agron.iastate.edu/cache/tile.py/1.0.0/nexrad-n0q-900913{suffix}/{z}/{x}/{y}.png"
+HRRR = "https://mesonet.agron.iastate.edu/cache/tile.py/1.0.0/hrrr::REFD-F{f}-{init}/{z}/{x}/{y}.png"
+HRRR_INIT = "https://mesonet.agron.iastate.edu/data/gis/images/4326/hrrr/refd_1080.json"
 OSM = "https://tile.openstreetmap.org/{z}/{x}/{y}.png"
 AGES = list(range(50, -1, -5))            # minutes ago, oldest first; IEM offers m05m..m50m plus the current frame
 
 DEFAULTS = {"weather_entity": "weather.forecast_home", "weather_fallback_entity": "", "latitude": 0, "longitude": 0, "zoom": 8, "width": 800, "height": 480, "frame_ms": 500,
-            "refresh_minutes": 5}
+            "refresh_minutes": 5, "forecast_minutes": 120, "forecast_step_min": 15}
 
 
 def load_options(path: str | None) -> dict:
@@ -183,11 +186,11 @@ def _font(px: int, bold=False):
     return ImageFont.load_default(px)
 
 
-def stamp(img: Image.Image, text: str) -> None:
+def stamp(img: Image.Image, text: str, fill=(255, 255, 255)) -> None:
     d = ImageDraw.Draw(img)
     f = _font(16, True)
     tw = d.textlength(text, font=f)
-    d.rectangle((6, 6, 18 + tw, 32), fill=(255, 255, 255), outline=(60, 60, 60))
+    d.rectangle((6, 6, 18 + tw, 32), fill=fill, outline=(60, 60, 60))
     d.text((12, 8), text, font=f, fill=(30, 30, 30))
 
 
@@ -202,18 +205,37 @@ def label(age: int, when: dt.datetime) -> str:
     return f"{when:%-I:%M %p}" + ("  now" if age == 0 else f"  -{age} min")
 
 
-def color_frame(base: Image.Image, rad: Image.Image, text: str) -> Image.Image:
+def forecast_label(lead: int, when: dt.datetime) -> str:
+    return f"{when:%-I:%M %p}  +{lead} min  FORECAST"
+
+
+def color_frame(base: Image.Image, rad: Image.Image, text: str, forecast: bool = False) -> Image.Image:
     gray = base.convert("L").point(lambda v: 110 + v * 145 // 255).convert("RGBA")     # fade the map
     out = Image.alpha_composite(gray, rad.point(lambda v: v))
     out = out.convert("RGB")
     marker(out)
-    stamp(out, text)
+    stamp(out, text, fill=(255, 214, 102) if forecast else (255, 255, 255))
+    if forecast:                                                                      # an amber frame: this is a model, not an observation
+        ImageDraw.Draw(out).rectangle((0, 0, out.width - 1, out.height - 1), outline=(255, 170, 0), width=4)
     return out
 
 
-def gif(frames: list[Image.Image], frame_ms: int) -> bytes:
+def hrrr_init() -> dt.datetime | None:
+    """Initialisation time (UTC) of the newest HRRR run IEM has processed, or None."""
+    try:
+        with urllib.request.urlopen(urllib.request.Request(HRRR_INIT, headers=UA), timeout=20) as r:
+            return dt.datetime.fromisoformat(json.load(r)["model_init_utc"].replace("Z", "+00:00"))
+    except Exception as exc:
+        log.warning("HRRR run time unavailable (no forecast frames): %s", exc)
+        return None
+
+
+def gif(frames: list[Image.Image], frame_ms: int, now_idx: int | None = None) -> bytes:
     buf = io.BytesIO()
-    durations = [frame_ms] * (len(frames) - 1) + [frame_ms * 4]        # linger on the latest frame
+    durations = [frame_ms] * len(frames)
+    durations[-1] = frame_ms * 4                                       # linger on the last frame
+    if now_idx is not None and 0 <= now_idx < len(frames) - 1:
+        durations[now_idx] = frame_ms * 3                              # and on "now", where observations end and the forecast begins
     frames = [f.quantize(colors=128, dither=Image.Dither.NONE) for f in frames]
     frames[0].save(buf, "GIF", save_all=True, append_images=frames[1:], duration=durations, loop=0, optimize=False)
     return buf.getvalue()
@@ -225,6 +247,8 @@ class Radar:
         self.lock = threading.Lock()
         self.color_gif = b""
         self.frames: list[bytes] = []
+        self.n_forecast = 0
+        self.hrrr_init: dt.datetime | None = None
         self.updated: dt.datetime | None = None
         self.weather: dict | None = None
 
@@ -256,10 +280,31 @@ class Radar:
             pngs.append(b.getvalue())
         if not color:
             raise RuntimeError("no radar frames could be fetched")
-        cg = gif(color, o["frame_ms"])
+        now_idx = len(color) - 1
+        n_fc, init = 0, None
+        if int(o["forecast_minutes"]) > 0:
+            init = hrrr_init()
+            step = max(15, int(o["forecast_step_min"]))
+            for lead in range(step, int(o["forecast_minutes"]) + 1, step) if init else ():
+                when = now + dt.timedelta(minutes=lead)
+                f_min = round((when - init).total_seconds() / 60 / 15) * 15      # the model's 15-minute steps
+                if not 0 <= f_min <= 1080:
+                    continue
+                try:
+                    rad = mosaic(HRRR, z, cx, cy, w, h, f=f"{f_min:04d}", init=init.strftime("%Y%m%d%H%M"))
+                except Exception as exc:
+                    log.warning("forecast frame +%d min failed: %s", lead, exc)
+                    continue
+                cf = color_frame(base, rad, forecast_label(lead, when), forecast=True)
+                color.append(cf)
+                b = io.BytesIO()
+                cf.save(b, "PNG")
+                pngs.append(b.getvalue())
+                n_fc += 1
+        cg = gif(color, o["frame_ms"], now_idx)
         with self.lock:
-            self.color_gif, self.frames = cg, pngs
-        log.info("updated %d frames (%d KB)", len(color), len(cg) // 1024)
+            self.color_gif, self.frames, self.n_forecast, self.hrrr_init = cg, pngs, n_fc, init
+        log.info("updated %d frames (%d forecast, model run %s) (%d KB)", len(color), n_fc, init, len(cg) // 1024)
 
     def run(self) -> None:
         every = self.opts["refresh_minutes"] * 60
@@ -298,7 +343,8 @@ class Handler(BaseHTTPRequestHandler):
         if path in ("/", "/index.html"):
             return self._send(200, PAGE.encode(), "text/html")
         if path == "/health":
-            return self._send(200, json.dumps({"radar_frames": len(frames), "weather": bool(wx and wx.get("state")),
+            return self._send(200, json.dumps({"radar_frames": len(frames), "forecast_frames": r.n_forecast,
+                                               "hrrr_run": r.hrrr_init.isoformat() if r.hrrr_init else None, "weather": bool(wx and wx.get("state")),
                                                "updated": updated.isoformat() if updated else None}).encode(),
                               "application/json")
         if path == "/weather.json":
