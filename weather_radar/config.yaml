@@ -1,5 +1,5 @@
 name: Weather Radar
-version: "0.7.1"
+version: "0.7.2"
 slug: weather_radar
 description: Weather forecast and animated NEXRAD radar for your location
 arch:
@@ -13,6 +13,7 @@ ingress: true
 ingress_port: 8080
 panel_icon: mdi:weather-partly-rainy
 panel_title: Weather
+panel_admin: false
 ports:
   8080/tcp: 8101
 ports_description:
